@@ -1,0 +1,5 @@
+lvgl/
+obj/
+liblvgl.a
+sim
+shots/

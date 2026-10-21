@@ -28,6 +28,7 @@ the device.*
 | **Voice chat** | Hold to talk, release to send. Shows what the server heard and its reply, plays the reply audio |
 | **Voice server** (swipe up/down in Voice chat) | See and change the server URL and API key, connect/disconnect switch with status, reset URL to `secrets.h` |
 | **Stocks** | Your watchlist: symbol, company, price, change and % change, colored green or red. Refreshes every minute while open; the ↻ / ❚❚ button pauses and resumes auto refresh |
+| **Quote** (tap a row in Stocks) | A detailed quote from `GetStockQuote`: price, change, open, previous close and the day's range (low–high with today's price marked). Refresh and remove buttons |
 | **Pick symbols** (+ or swipe left in Stocks) | Tabs of preset symbols (**QQQ 1**, **QQQ 2**, **Blue Chip**) and **Other** (watchlist symbols not on a tab, e.g. added from Claude). Tap to add (green) or remove (gray) |
 | **Stock server** (gear in Stocks) | See and change the MCP server URL and API key, connection status, refresh now, reset URL to `secrets.h` |
 | **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new), battery (%, state, voltage), version and free memory, restart, reset |
@@ -43,7 +44,9 @@ the device.*
 | Voice server | Swipe up / down, or the ⌄ button | Back to Voice chat |
 | Stocks | Swipe left, or the + button | Pick symbols |
 | Stocks | Swipe right, or the ‹ button | Back to Home |
+| Stocks | Tap a row | Quote screen for that symbol |
 | Stocks | Long-press a row | Remove that symbol (asks first) |
+| Quote | Swipe right, or the ‹ button | Back to Stocks |
 | Pick symbols | Tap a symbol | Add or remove it (orange while it's being saved) |
 | Pick symbols, Stock server | Swipe right, or the ‹ button | Back to Stocks |
 | Settings and its screens | Swipe right, or the ‹ button | Back |
@@ -143,8 +146,14 @@ How Stocks uses the server's tools (names and the argument name are in `app_conf
 | `GetStockWatchList` | Quotes | `{"Watchlist":[{"Symbol":"AAPL","Name":"Apple Inc","Price":341.07,"Change":5.15,"ChangePercent":1.5331}]}` |
 | `AddSymbolToStockWatchList` | Add, `{"symbol":"AAPL"}` | `Symbol AAPL successfully added` / `Symbol already exists` |
 | `RemoveSymbolFromStockWatchList` | Remove, `{"symbol":"AAPL"}` | `Successfully removed AAPL ...` / `Error deleting ...` |
+| `GetStockQuote` | The Quote screen, `{"symbol":"AAPL"}` | `{"Quote":{"Symbol":"AAPL","Name":"Apple Inc","Price":341.07,"Change":5.15,"ChangePercent":1.53,"DayHigh":343.2,"DayLow":335.8,"OpenPrice":336.1,"PreviousClose":335.92}}` |
 
-`RemoveAllSymbolsFromStockWatchList` and `GetStockQuote` are never called. The server always answers
+The Quote screen shows the watchlist's numbers at once and fills in the rest when `GetStockQuote`
+answers (it jumps ahead of a pending watchlist refresh). While it's open and auto refresh is on, it
+refreshes every `STOCKS_REFRESH_MS`. A quote of all zeros (what the quote service returns for a
+ticker it doesn't know) shows as "No quote for XYZ".
+
+`RemoveAllSymbolsFromStockWatchList` is never called. The server always answers
 `isError: false`, so, as on the StackChan, the add/remove result comes from the message text, and
 "Error deleting" is read as "it wasn't in the list". Other reply shapes (plain JSON arrays, other key
 names, numbers as strings, JSON encoded twice) are accepted too; see `main/apps/stocks_parse.c`.
@@ -220,7 +229,7 @@ esp32-s3-1-75c-fusion-apps/
 │       ├── app_settings.c         Settings app (+ Wi-Fi scan screen)
 │       ├── app_voice.c            Voice chat screen + Voice server screen
 │       ├── voice_core.c, voice.h  recording, WebSocket, playback (no LVGL in here)
-│       ├── app_stocks.c           Stocks: Watchlist, Pick symbols and Stock server screens
+│       ├── app_stocks.c           Stocks: Watchlist, Quote, Pick symbols and Stock server screens
 │       ├── stocks_core.c, stocks.h   the Stocks engine task: tool calls, queue, refresh timer (no LVGL)
 │       └── stocks_parse.c/.h      parses the watchlist server's replies (pure C, host-tested)
 ├── tools/
@@ -371,7 +380,7 @@ make                      # first run clones cJSON; prints "N checks, 0 failed"
 | `app_config.h` | `DEFAULT_DARK_MODE`, `DEFAULT_BRIGHTNESS`, `DEFAULT_VOLUME` | dark, 80 %, 75 % (first boot) |
 | `apps/voice_core.c` | `REC_MAX_SECONDS`, `TURN_TIMEOUT_US`, `RX_MAX_BYTES` | 10 s, 45 s, 3 MB |
 | `app_config.h` | `STOCKS_REFRESH_MS`, `STOCKS_RETRY_MS` | 60 s, 15 s |
-| `app_config.h` | `STOCKS_TOOL_*`, `STOCKS_SYMBOL_ARG`, `STOCKS_KEY_HEADER` | FusionStockWatchListMCP names, `symbol`, `x-api-key` |
+| `app_config.h` | `STOCKS_TOOL_*` (incl. `STOCKS_TOOL_QUOTE`), `STOCKS_SYMBOL_ARG`, `STOCKS_KEY_HEADER` | FusionStockWatchListMCP names, `symbol`, `x-api-key` |
 | `app_config.h` | `DEFAULT_STOCKS_AUTO` | 1 (auto refresh on, first boot) |
 | `app_config.h` | `MCP_DEBUG` | 0; 1 logs the first 300 bytes of each MCP reply |
 | `apps/app_stocks.c` | `GROUPS` (Pick tabs, up to 25 symbols each) | QQQ 1, QQQ 2, Blue Chip |

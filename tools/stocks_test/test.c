@@ -90,6 +90,34 @@ static void classify(void)
     CHECK(!stocks_normalize_ticker(u), "ticker digit first");
 }
 
+static void detail(void)
+{
+    stocks_detail_t d;
+    char err[96];
+    const char *real = "{\"Quote\":{\"Symbol\":\"AAPL\",\"Name\":\"Apple Inc\",\"Logo\":\"https://x/aapl.png\","
+                       "\"ChangePercent\":1.5331,\"Price\":341.07,\"Change\":5.15,\"DayHigh\":343.2,"
+                       "\"DayLow\":335.8,\"OpenPrice\":336.1,\"PreviousClose\":335.92}}";
+    CHECK(stocks_parse_detail(real, "AAPL", &d, err, sizeof(err)), "real detail: %s", err);
+    CHECK(!strcmp(d.q.sym, "AAPL") && !strcmp(d.q.name, "Apple Inc"), "detail sym/name");
+    CHECK(d.has_high && fabs(d.high - 343.2) < 1e-9 && d.has_low && fabs(d.low - 335.8) < 1e-9, "high/low");
+    CHECK(d.has_open && d.has_prev_close && fabs(d.prev_close - 335.92) < 1e-9, "open/prev");
+    CHECK(d.q.has_change && d.q.has_pct && !d.has_volume, "change/pct");
+
+    const char *zeros = "{\"Quote\":{\"Symbol\":\"ZZZZZ\",\"Price\":0,\"Change\":null,\"PreviousClose\":0}}";
+    CHECK(!stocks_parse_detail(zeros, "ZZZZZ", &d, err, sizeof(err)) && !strcmp(err, "No quote for ZZZZZ"), "zeros: %s", err);
+    CHECK(!stocks_parse_detail("Error getting quote", "AAPL", &d, err, sizeof(err)) && !strcmp(err, "Error getting quote"), "error");
+    CHECK(!stocks_parse_detail("", "AAPL", &d, err, sizeof(err)), "blank");
+
+    /* encoded twice, no symbol field, Finnhub-style keys */
+    const char *fh = "\"{\\\"c\\\":180.5,\\\"d\\\":-1.2,\\\"dp\\\":-0.66,\\\"h\\\":182,\\\"l\\\":179,"
+                     "\\\"o\\\":181,\\\"pc\\\":181.7}\"";
+    CHECK(stocks_parse_detail(fh, "NVDA", &d, err, sizeof(err)), "finnhub: %s", err);
+    CHECK(!strcmp(d.q.sym, "NVDA") && fabs(d.q.price - 180.5) < 1e-9 && d.has_low && d.has_prev_close, "finnhub fields");
+
+    const char *list = "[{\"symbol\":\"MSFT\",\"price\":1},{\"symbol\":\"AAPL\",\"price\":2,\"high\":3}]";
+    CHECK(stocks_parse_detail(list, "AAPL", &d, err, sizeof(err)) && fabs(d.q.price - 2) < 1e-9 && d.has_high, "list match");
+}
+
 static void mcp(void)
 {
     const char *sse = "event: message\r\ndata: {\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"content\":[{\"type\":\"text\","
@@ -132,6 +160,7 @@ int main(void)
     quotes();
     symbols();
     classify();
+    detail();
     mcp();
     printf("%d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;

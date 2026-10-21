@@ -158,6 +158,8 @@ static lv_color_t status_text(char *buf, size_t len)
 /* ============================================================== Watchlist screen */
 static lv_obj_t *pick_build(void *arg);
 static lv_obj_t *server_build(void *arg);
+static lv_obj_t *quote_build(void *arg);
+static stocks_sym_t s_quote_sym;          /* the symbol on the Quote screen */
 
 typedef struct {
     lv_obj_t *row, *sym, *name, *price, *pill, *chg;
@@ -196,6 +198,15 @@ static void row_long_cb(lv_event_t *e)
     ui_confirm("Remove symbol?", msg, "Remove", true, do_remove, sym);
 }
 
+static void row_click_cb(lv_event_t *e)
+{
+    if (ui_nav_busy()) return;
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i < 0 || i >= w.nrows) return;
+    strlcpy(s_quote_sym, w.shown[i], sizeof(s_quote_sym));
+    ui_nav_push(quote_build, NULL, LV_SCREEN_LOAD_ANIM_MOVE_LEFT);
+}
+
 static quote_row_t make_row(int i)
 {
     quote_row_t r;
@@ -215,6 +226,8 @@ static quote_row_t make_row(int i)
     lv_obj_remove_flag(r.row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(r.row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(r.row, row_long_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)i);
+    /* SHORT_CLICKED: not sent after a long press or when the touch scrolled the list */
+    lv_obj_add_event_cb(r.row, row_click_cb, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)i);
 
     lv_obj_t *left = lv_obj_create(r.row);
     lv_obj_remove_style_all(left);
@@ -745,6 +758,304 @@ static lv_obj_t *pick_build(void *arg)
     p.ver = stocks_version();
     p.timer = lv_timer_create(pick_timer_cb, 200, NULL);
     lv_obj_add_event_cb(scr, pick_delete_cb, LV_EVENT_DELETE, NULL);
+    return scr;
+}
+
+/* ============================================================== Quote screen (tap a row)
+ * A detailed quote from GetStockQuote: price, change, open, previous close and the day's range.
+ * Shows the watchlist's numbers right away and fills in the rest when the reply arrives. */
+typedef struct {
+    lv_obj_t   *scr, *name, *price, *pill, *chg, *open_v, *prev_v, *range, *bar, *fill, *dot, *lo, *hi,
+               *status;
+    lv_timer_t *timer;
+    uint32_t    ver;
+    int         ticks;
+} quote_ui_t;
+
+static quote_ui_t qv;
+
+#define BAR_W 240
+
+static const stocks_quote_t *row_for(const char *sym)
+{
+    for (int i = 0; i < s_snap.nrows; i++) if (!strcmp(s_snap.rows[i].sym, sym)) return &s_snap.rows[i];
+    return NULL;
+}
+
+static void set_value(lv_obj_t *l, bool has, double v)
+{
+    char buf[32];
+    if (has) fmt_price(v, buf, sizeof(buf));
+    else snprintf(buf, sizeof(buf), "...");
+    lv_label_set_text(l, buf);
+}
+
+static void quote_update(void)
+{
+    stocks_get(&s_snap);
+    qv.ver = stocks_version();
+    bool have = s_snap.detail_state == STOCKS_DETAIL_OK && !strcmp(s_snap.detail_sym, s_quote_sym);
+    const stocks_detail_t *d = have ? &s_snap.detail : NULL;
+    const stocks_quote_t *q = d ? &d->q : row_for(s_quote_sym);
+
+    /* name, price, change */
+    char buf[128];
+    text_to_ascii(q && q->name[0] ? q->name : "", buf, sizeof(buf));
+    lv_label_set_text(qv.name, buf);
+    if (q && q->has_price) {
+        fmt_price(q->price, buf, sizeof(buf));
+        lv_label_set_text(qv.price, buf);
+    } else {
+        lv_label_set_text(qv.price, "...");
+    }
+    if (q && q->has_price && (q->has_change || q->has_pct)) {
+        double v = q->has_change ? q->change : q->pct;
+        lv_color_t c = v > 0 ? ui_pal.ok : (v < 0 ? ui_pal.err : lv_color_hex(UI_C_GRAY));
+        if (q->has_change && q->has_pct) snprintf(buf, sizeof(buf), "%+.2f  (%+.2f%%)", q->change, q->pct);
+        else if (q->has_change)          snprintf(buf, sizeof(buf), "%+.2f", q->change);
+        else                             snprintf(buf, sizeof(buf), "%+.2f%%", q->pct);
+        lv_label_set_text(qv.chg, buf);
+        lv_obj_set_style_bg_color(qv.pill, c, 0);
+        lv_obj_remove_flag(qv.pill, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(qv.pill, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* open / previous close */
+    set_value(qv.open_v, d && d->has_open, d ? d->open : 0);
+    set_value(qv.prev_v, d && d->has_prev_close, d ? d->prev_close : 0);
+
+    /* day range: low ----o---- high */
+    if (d && d->has_high && d->has_low && d->high > d->low) {
+        lv_obj_remove_flag(qv.range, LV_OBJ_FLAG_HIDDEN);
+        fmt_price(d->low, buf, sizeof(buf));
+        lv_label_set_text(qv.lo, buf);
+        fmt_price(d->high, buf, sizeof(buf));
+        lv_label_set_text(qv.hi, buf);
+        double f = (d->q.price - d->low) / (d->high - d->low);
+        if (f < 0) f = 0;
+        if (f > 1) f = 1;
+        int x = (int)(f * BAR_W);
+        lv_obj_set_width(qv.fill, x < 4 ? 4 : x);
+        lv_obj_set_x(qv.dot, 20 + x - 8);              /* the bar starts 20 px into the range box */
+    } else {
+        lv_obj_add_flag(qv.range, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* status */
+    lv_color_t c = ui_pal.text_dim;
+    if (s_snap.detail_state == STOCKS_DETAIL_ERROR) {
+        snprintf(buf, sizeof(buf), "%s", s_snap.detail_note);
+        c = ui_pal.err;
+    } else if (s_snap.detail_state == STOCKS_DETAIL_LOADING) {
+        snprintf(buf, sizeof(buf), "%s", s_snap.state == STOCKS_WAIT_WIFI ? "Waiting for Wi-Fi..." :
+                                         have ? "Updating..." : "Loading quote...");
+    } else if (have && s_snap.detail_at) {
+        char clk[16];
+        fmt_clock(s_snap.detail_at, clk, sizeof(clk));
+        snprintf(buf, sizeof(buf), "Quote at %s", clk);
+    } else if (have) {
+        char age[24];
+        fmt_age(esp_timer_get_time() - s_snap.detail_us, age, sizeof(age));
+        snprintf(buf, sizeof(buf), "Quote from %s", age);
+    } else {
+        buf[0] = '\0';
+    }
+    lv_label_set_text(qv.status, buf);
+    lv_obj_set_style_text_color(qv.status, c, 0);
+}
+
+static void quote_timer_cb(lv_timer_t *t)
+{
+    if (stocks_version() != qv.ver) quote_update();
+    if (++qv.ticks % 4) return;
+    /* while it's open, refresh it as often as the watchlist (if auto refresh is on) */
+    stocks_get(&s_snap);
+    if (s_snap.auto_refresh && s_snap.detail_state == STOCKS_DETAIL_OK && s_snap.detail_us &&
+        esp_timer_get_time() - s_snap.detail_us > (int64_t)STOCKS_REFRESH_MS * 1000) {
+        stocks_request_detail(s_quote_sym);
+    }
+}
+
+static void quote_delete_cb(lv_event_t *e)
+{
+    if (lv_event_get_target_obj(e) != qv.scr) return;
+    if (qv.timer) lv_timer_delete(qv.timer);
+    memset(&qv, 0, sizeof(qv));
+}
+
+static void quote_back_cb(lv_event_t *e)
+{
+    if (ui_nav_busy()) return;
+    ui_nav_pop(LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
+}
+
+static void quote_gesture_cb(lv_event_t *e)
+{
+    lv_indev_t *indev = lv_indev_active();
+    if (!indev || ui_nav_busy()) return;
+    if (lv_indev_get_gesture_dir(indev) != LV_DIR_RIGHT) return;
+    lv_indev_wait_release(indev);
+    ui_nav_pop(LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
+}
+
+static void quote_refresh_cb(lv_event_t *e)
+{
+    if (ui_nav_busy()) return;
+    stocks_request_detail(s_quote_sym);
+    quote_update();
+}
+
+static void do_quote_remove(void *user)
+{
+    if (stocks_remove(s_quote_sym) == STOCKS_TAP_FULL) {
+        ui_toast("Busy - try again in a moment");
+        return;
+    }
+    ui_nav_pop(LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
+}
+
+static void quote_remove_cb(lv_event_t *e)
+{
+    if (ui_nav_busy()) return;
+    static char msg[80];
+    snprintf(msg, sizeof(msg), "Take %s off your watchlist?", s_quote_sym);
+    ui_confirm("Remove symbol?", msg, "Remove", true, do_quote_remove, NULL);
+}
+
+static lv_obj_t *stat_card(lv_obj_t *parent, const char *title, lv_obj_t **value)
+{
+    lv_obj_t *c = lv_obj_create(parent);
+    lv_obj_remove_style_all(c);
+    lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(c, 146, 60);
+    lv_obj_set_style_radius(c, 16, 0);
+    lv_obj_set_style_bg_color(c, ui_pal.card, 0);
+    lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow(c, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(c, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(c, 2, 0);
+    ui_label(c, &lv_font_montserrat_14, ui_pal.text_dim, title);
+    *value = ui_label(c, &lv_font_montserrat_20, ui_pal.text, "...");
+    return c;
+}
+
+static lv_obj_t *quote_build(void *arg)
+{
+    if (qv.timer) lv_timer_delete(qv.timer);
+    memset(&qv, 0, sizeof(qv));
+    lv_obj_t *scr = ui_screen();
+    qv.scr = scr;
+    lv_obj_add_event_cb(scr, quote_gesture_cb, LV_EVENT_GESTURE, NULL);
+
+    /* header: [<] AAPL */
+    lv_obj_t *hdr = lv_obj_create(scr);
+    lv_obj_remove_style_all(hdr);
+    lv_obj_remove_flag(hdr, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(hdr, LV_SIZE_CONTENT, 44);
+    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 34);
+    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(hdr, 10, 0);
+    lv_obj_t *back = ui_round_button(hdr, ICON_LEFT, &ui_icons_16, 40, ui_pal.card, ui_pal.text);
+    lv_obj_add_event_cb(back, quote_back_cb, LV_EVENT_CLICKED, NULL);
+    ui_label(hdr, &lv_font_montserrat_24, ui_pal.text, s_quote_sym);
+    lv_obj_t *sp = lv_obj_create(hdr);
+    lv_obj_remove_style_all(sp);
+    lv_obj_set_size(sp, 40, 40);
+
+    qv.name = ui_label(scr, &lv_font_montserrat_16, ui_pal.text_dim, "");
+    lv_obj_set_size(qv.name, 290, lv_font_get_line_height(&lv_font_montserrat_16));
+    lv_label_set_long_mode(qv.name, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_style_text_align(qv.name, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(qv.name, LV_ALIGN_TOP_MID, 0, 84);
+
+    qv.price = ui_label(scr, &lv_font_montserrat_44, ui_pal.text, "...");
+    lv_obj_align(qv.price, LV_ALIGN_TOP_MID, 0, 106);
+
+    qv.pill = lv_obj_create(scr);
+    lv_obj_remove_style_all(qv.pill);
+    lv_obj_remove_flag(qv.pill, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(qv.pill, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_radius(qv.pill, 10, 0);
+    lv_obj_set_style_bg_opa(qv.pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_hor(qv.pill, 12, 0);
+    lv_obj_set_style_pad_ver(qv.pill, 3, 0);
+    qv.chg = ui_label(qv.pill, &lv_font_montserrat_16, lv_color_white(), "");
+    lv_obj_align(qv.pill, LV_ALIGN_TOP_MID, 0, 162);
+
+    /* open | previous close */
+    lv_obj_t *cards = lv_obj_create(scr);
+    lv_obj_remove_style_all(cards);
+    lv_obj_remove_flag(cards, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(cards, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(cards, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(cards, 10, 0);
+    lv_obj_align(cards, LV_ALIGN_TOP_MID, 0, 202);
+    stat_card(cards, "Open", &qv.open_v);
+    stat_card(cards, "Prev close", &qv.prev_v);
+
+    /* day range */
+    qv.range = lv_obj_create(scr);
+    lv_obj_remove_style_all(qv.range);
+    lv_obj_remove_flag(qv.range, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(qv.range, BAR_W + 40, 70);
+    lv_obj_align(qv.range, LV_ALIGN_TOP_MID, 0, 274);
+    lv_obj_t *rt = ui_label(qv.range, &lv_font_montserrat_14, ui_pal.text_dim, "Day range");
+    lv_obj_align(rt, LV_ALIGN_TOP_MID, 0, 0);
+    qv.bar = lv_obj_create(qv.range);
+    lv_obj_remove_style_all(qv.bar);
+    lv_obj_remove_flag(qv.bar, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(qv.bar, BAR_W, 8);
+    lv_obj_set_style_radius(qv.bar, 4, 0);
+    lv_obj_set_style_bg_color(qv.bar, ui_pal.card_press, 0);
+    lv_obj_set_style_bg_opa(qv.bar, LV_OPA_COVER, 0);
+    lv_obj_align(qv.bar, LV_ALIGN_TOP_MID, 0, 28);
+    qv.fill = lv_obj_create(qv.bar);
+    lv_obj_remove_style_all(qv.fill);
+    lv_obj_remove_flag(qv.fill, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(qv.fill, 4, 8);
+    lv_obj_set_style_radius(qv.fill, 4, 0);
+    lv_obj_set_style_bg_color(qv.fill, ui_pal.accent, 0);
+    lv_obj_set_style_bg_opa(qv.fill, LV_OPA_COVER, 0);
+    qv.dot = lv_obj_create(qv.range);                 /* a sibling of the bar, so it isn't clipped */
+    lv_obj_remove_style_all(qv.dot);
+    lv_obj_remove_flag(qv.dot, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(qv.dot, 16, 16);
+    lv_obj_set_style_radius(qv.dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(qv.dot, ui_pal.text, 0);
+    lv_obj_set_style_bg_opa(qv.dot, LV_OPA_COVER, 0);
+    lv_obj_set_pos(qv.dot, 20 - 8, 28 - 4);
+    qv.lo = ui_label(qv.range, &lv_font_montserrat_14, ui_pal.text_dim, "");
+    lv_obj_align(qv.lo, LV_ALIGN_TOP_LEFT, 20, 44);
+    qv.hi = ui_label(qv.range, &lv_font_montserrat_14, ui_pal.text_dim, "");
+    lv_obj_align(qv.hi, LV_ALIGN_TOP_RIGHT, -20, 44);
+    lv_obj_add_flag(qv.range, LV_OBJ_FLAG_HIDDEN);
+
+    qv.status = ui_label(scr, &lv_font_montserrat_14, ui_pal.text_dim, "");
+    lv_obj_set_width(qv.status, 300);
+    lv_obj_set_style_text_align(qv.status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(qv.status, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_align(qv.status, LV_ALIGN_TOP_MID, 0, 352);
+
+    /* bottom: [refresh] [remove] */
+    lv_obj_t *bar = lv_obj_create(scr);
+    lv_obj_remove_style_all(bar);
+    lv_obj_remove_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(bar, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(bar, 18, 0);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -30);
+    lv_obj_t *rb = ui_round_button(bar, ICON_ROTATE, &ui_icons_20, 52, ui_pal.card, ui_pal.text);
+    lv_obj_add_event_cb(rb, quote_refresh_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *xb = ui_round_button(bar, ICON_TRASH, &ui_icons_20, 52, ui_pal.card, ui_pal.err);
+    lv_obj_add_event_cb(xb, quote_remove_cb, LV_EVENT_CLICKED, NULL);
+
+    stocks_request_detail(s_quote_sym);
+    quote_update();
+    qv.timer = lv_timer_create(quote_timer_cb, 250, NULL);
+    lv_obj_add_event_cb(scr, quote_delete_cb, LV_EVENT_DELETE, NULL);
     return scr;
 }
 

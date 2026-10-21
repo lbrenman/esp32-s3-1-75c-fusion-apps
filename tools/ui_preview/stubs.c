@@ -141,6 +141,28 @@ void stocks_fake_finish(void)
     g_ss.npend = 0;
     g_ss_ver++;
 }
+void stocks_request_detail(const char *sym)
+{
+    printf("stocks detail %s\n", sym);
+    if (strcmp(g_ss.detail_sym, sym)) { memset(&g_ss.detail, 0, sizeof(g_ss.detail)); strcpy(g_ss.detail_sym, sym); }
+    g_ss.detail_state = STOCKS_DETAIL_LOADING;
+    g_ss_ver++;
+}
+/* answer the pending detail request (ok = false: an error) */
+void stocks_fake_detail(bool ok)
+{
+    if (!ok) { g_ss.detail_state = STOCKS_DETAIL_ERROR; snprintf(g_ss.detail_note, sizeof(g_ss.detail_note), "No quote for %s", g_ss.detail_sym); g_ss_ver++; return; }
+    stocks_detail_t d = { 0 };
+    for (int i = 0; i < g_ss.nrows; i++) if (!strcmp(g_ss.rows[i].sym, g_ss.detail_sym)) d.q = g_ss.rows[i];
+    d.q.price = 182.61; d.q.change = -2.95; d.q.pct = -1.59;
+    d.open = 185.10; d.prev_close = 185.56; d.high = 186.02; d.low = 180.87;
+    d.has_open = d.has_prev_close = d.has_high = d.has_low = true;
+    g_ss.detail = d;
+    g_ss.detail_state = STOCKS_DETAIL_OK;
+    g_ss.detail_us = g_sim_us;
+    g_ss.detail_at = 1792600920;
+    g_ss_ver++;
+}
 uint32_t stocks_version(void) { return g_ss_ver; }
 void stocks_get(stocks_snapshot_t *o) { *o = g_ss; }
 

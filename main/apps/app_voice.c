@@ -275,6 +275,7 @@ static void touch_event_cb(lv_event_t *e)
 
 static lv_obj_t *voice_build(void *arg)
 {
+    if (s_ui.timer) lv_timer_delete(s_ui.timer);   /* rebuilt in place (theme change): drop the old timer */
     memset(&s_ui, 0, sizeof(s_ui));
     lv_obj_t *scr = ui_screen();
     s_ui.scr = scr;

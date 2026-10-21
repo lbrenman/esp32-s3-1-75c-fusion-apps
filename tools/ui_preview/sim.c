@@ -25,6 +25,7 @@ extern power_info_t g_power;
 void stocks_fake_load(int n);
 void stocks_fake_finish(void);
 void stocks_bump(void);
+void stocks_fake_detail(bool ok);
 
 static uint16_t fb[W * W];
 static uint8_t  drawbuf[W * W * 2];
@@ -260,6 +261,17 @@ int main(void)
     }
     shot("45_stocks_remove_confirm");
     tap_text("Cancel");
+    tap_text("NVDA");                    /* tap a row -> Quote screen */
+    shot("45b_quote_loading");
+    stocks_fake_detail(true);
+    shot("45c_quote");
+    swipe(110, 250, 360, 250);           /* swipe right -> back */
+    step(400);
+    tap_text("INTC");
+    stocks_fake_detail(false);
+    shot("45d_quote_error");
+    swipe(110, 250, 360, 250);
+    step(400);
     swipe(360, 250, 110, 250);           /* swipe left -> Pick */
     shot("46_pick_qqq1");
     tap_text("NVDA");                    /* listed: remove */
@@ -297,7 +309,11 @@ int main(void)
     tap_text("QQQ 1");
     shot("58_pick_light");
     swipe(110, 250, 360, 250);
-    swipe(110, 250, 360, 250);
+    tap_text("AAPL");
+    stocks_fake_detail(true);
+    shot("58b_quote_light");
+    swipe(110, 250, 360, 250);           /* Quote -> Watchlist */
+    swipe(110, 250, 360, 250);           /* Watchlist -> Home */
     printf("stocks active should be 0 now\n");
     shot("59_home_light_three_apps");
 

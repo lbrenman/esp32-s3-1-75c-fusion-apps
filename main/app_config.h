@@ -45,6 +45,7 @@
 #define STOCKS_TOOL_LIST     "GetStockWatchListSymbols"
 #define STOCKS_TOOL_ADD      "AddSymbolToStockWatchList"
 #define STOCKS_TOOL_REMOVE   "RemoveSymbolFromStockWatchList"
+#define STOCKS_TOOL_QUOTE    "GetStockQuote"           /* detailed quote when you tap a row */
 #define STOCKS_SYMBOL_ARG    "symbol"      /* argument name of the add/remove tools */
 #define DEFAULT_STOCKS_AUTO  1             /* auto refresh on at first boot */
 #define MCP_DEBUG            0             /* 1 = log the first 300 bytes of every MCP reply (tag "mcp") */

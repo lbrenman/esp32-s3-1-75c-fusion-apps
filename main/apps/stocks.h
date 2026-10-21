@@ -11,6 +11,13 @@
 #define STOCKS_PEND_MAX 16          /* adds/removes waiting to be sent */
 
 typedef enum {
+    STOCKS_DETAIL_NONE,
+    STOCKS_DETAIL_LOADING,
+    STOCKS_DETAIL_OK,
+    STOCKS_DETAIL_ERROR,      /* detail_note says why */
+} stocks_detail_state_t;
+
+typedef enum {
     STOCKS_OFF,           /* app closed */
     STOCKS_NOT_SET,       /* no usable server URL */
     STOCKS_WAIT_WIFI,
@@ -39,6 +46,14 @@ typedef struct {
     char     note[100];                 /* error text for the status line */
     char     toast[80];                 /* result of the last add/remove */
     uint32_t toast_ver;
+
+    /* detailed quote (GetStockQuote) for the symbol on the Quote screen */
+    stocks_sym_t          detail_sym;
+    stocks_detail_state_t detail_state;
+    stocks_detail_t       detail;
+    int64_t               detail_us;    /* when it arrived (esp_timer), 0 = never */
+    time_t                detail_at;    /* wall-clock time of it, 0 if the clock wasn't set */
+    char                  detail_note[100];
 } stocks_snapshot_t;
 
 typedef enum {
@@ -56,6 +71,7 @@ bool         stocks_auto(void);
 void         stocks_refresh_now(void);
 void         stocks_config_changed(void);      /* server URL or API key changed: reconnect, reload */
 stocks_tap_t stocks_toggle(const char *sym);   /* add if not in the list, remove if it is */
+void         stocks_request_detail(const char *sym);   /* fetch a detailed quote (Quote screen) */
 stocks_tap_t stocks_remove(const char *sym);
 
 uint32_t     stocks_version(void);             /* changes whenever anything in the snapshot changes */

@@ -43,6 +43,7 @@ static int      s_qlen;
 static volatile bool s_active;
 static volatile bool s_refresh_req;
 static volatile bool s_reset;
+static volatile bool s_detail_req;         /* fetch s->detail_sym */
 
 /* worker-only scratch (big: kept off the task stack and out of internal RAM) */
 static stocks_quote_t *s_quotes;
@@ -191,6 +192,40 @@ static void refresh(void)
     unlock();
 }
 
+static void fetch_detail(void)
+{
+    stocks_sym_t sym;
+    lock();
+    strlcpy(sym, s->detail_sym, sizeof(sym));
+    s->detail_state = STOCKS_DETAIL_LOADING;
+    unlock();
+    s_detail_req = false;
+
+    char err[100] = "";
+    char *text = NULL;
+    static stocks_detail_t d;                 /* worker only; keeps it off the stack */
+    mcp_status_t st = call(STOCKS_TOOL_QUOTE, sym, &text, err, sizeof(err));
+    bool ok = st == MCP_OK && stocks_parse_detail(text, sym, &d, err, sizeof(err));
+    if (st == MCP_OK && !ok) ESP_LOGW(TAG, "quote reply for %s: %.200s", sym, text ? text : "");
+    free(text);
+
+    lock();
+    if (strcmp(sym, s->detail_sym) == 0) {    /* still the symbol on screen */
+        if (ok) {
+            s->detail = d;
+            s->detail_state = STOCKS_DETAIL_OK;
+            s->detail_us = esp_timer_get_time();
+            s->detail_at = net_time_valid() ? time(NULL) : 0;
+            s->detail_note[0] = '\0';
+        } else {
+            s->detail_state = STOCKS_DETAIL_ERROR;
+            strlcpy(s->detail_note, err[0] ? err : "Request failed", sizeof(s->detail_note));
+        }
+    }
+    unlock();
+    if (ok) ESP_LOGI(TAG, "quote %s: %.2f", sym, d.q.price);
+}
+
 static void do_change(const change_t *c)
 {
     char err[100] = "";
@@ -247,6 +282,7 @@ static bool url_usable(const char *url)
 static TickType_t next_wait(void)
 {
     if (s_reset) return 0;
+    if (s_detail_req && s_active && s->state != STOCKS_WAIT_WIFI && s->state != STOCKS_NOT_SET) return 0;
     if (s->state == STOCKS_WAIT_WIFI) return pdMS_TO_TICKS(1000);
     if (s->state == STOCKS_NOT_SET) return portMAX_DELAY;      /* until the URL changes */
     if (s_qlen > 0) return 0;
@@ -315,6 +351,8 @@ static void worker(void *arg)
         }
         if (changed) s_refresh_req = true;
         if (!s_active) continue;            /* finished the queue after the app closed */
+
+        if (s_detail_req) fetch_detail();   /* the Quote screen is waiting: before the refresh */
 
         bool due = s->auto_refresh && s->next_us && esp_timer_get_time() >= s->next_us;
         if (s_refresh_req || due) refresh();
@@ -400,4 +438,21 @@ static stocks_tap_t queue_change(const char *sym, int mode /* 0 toggle, 1 remove
 }
 
 stocks_tap_t stocks_toggle(const char *sym) { return queue_change(sym, 0); }
+
+void stocks_request_detail(const char *sym)
+{
+    if (!s_mtx) return;
+    lock();
+    if (strcmp(s->detail_sym, sym) != 0) {    /* another symbol: forget the old one */
+        memset(&s->detail, 0, sizeof(s->detail));
+        s->detail_us = 0;
+        s->detail_at = 0;
+        s->detail_note[0] = '\0';
+        strlcpy(s->detail_sym, sym, sizeof(s->detail_sym));
+    }
+    s->detail_state = STOCKS_DETAIL_LOADING;
+    unlock();
+    s_detail_req = true;
+    wake();
+}
 stocks_tap_t stocks_remove(const char *sym) { return queue_change(sym, 1); }

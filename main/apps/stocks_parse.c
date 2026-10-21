@@ -18,6 +18,11 @@ static const char *const K_CHANGE[] = { "change", "pricechange", "netchange", "c
 static const char *const K_PCT[]    = { "changepercent", "percentchange", "changepct", "pctchange",
                                         "changespercentage", "changepercentage", "percentagechange",
                                         "regularmarketchangepercent", "percent", "dp", NULL };
+static const char *const K_HIGH[]   = { "dayhigh", "high", "regularmarketdayhigh", "h", NULL };
+static const char *const K_LOW[]    = { "daylow", "low", "regularmarketdaylow", "l", NULL };
+static const char *const K_OPEN[]   = { "openprice", "open", "regularmarketopen", "o", NULL };
+static const char *const K_PREV[]   = { "previousclose", "prevclose", "regularmarketpreviousclose", "pc", NULL };
+static const char *const K_VOLUME[] = { "volume", "regularmarketvolume", "v", NULL };
 
 /* "Change_Percent" -> "changepercent" */
 static void norm_key(const char *in, char *out, size_t len)
@@ -368,4 +373,68 @@ stocks_reply_t stocks_classify(const char *text)
         return STOCKS_REPLY_OK;
     }
     return STOCKS_REPLY_UNKNOWN;
+}
+
+/* ----------------------------------------------------------------- one detailed quote */
+bool stocks_parse_detail(const char *text, const char *sym, stocks_detail_t *out, char *err, size_t err_len)
+{
+    memset(out, 0, sizeof(*out));
+    err[0] = '\0';
+    if (!text || is_blank(text)) { snprintf(err, err_len, "No quote for %s", sym); return false; }
+
+    cJSON *root = parse_json(text);
+    if (!root || cJSON_IsString(root)) {
+        const char *msg = cJSON_IsString(root) ? root->valuestring : text;
+        if (looks_like_error(msg)) copy_msg(msg, err, err_len);
+        else snprintf(err, err_len, "No quote for %s", sym);
+        cJSON_Delete(root);
+        return false;
+    }
+
+    /* {"Quote":{...}}, a bare quote object, or a one-item list */
+    const cJSON *rec = find_records(root, 0);
+    if (cJSON_IsArray(rec)) {
+        const cJSON *it, *match = NULL;
+        cJSON_ArrayForEach(it, rec) {
+            stocks_sym_t s;
+            if (!match && record_symbol(it, s) && !strcmp(s, sym)) match = it;
+        }
+        rec = match ? match : cJSON_GetArrayItem(rec, 0);
+    }
+    if (!cJSON_IsObject(rec)) {
+        /* a quote without a symbol field: take the first object that has a price */
+        const cJSON *it;
+        rec = NULL;
+        if (cJSON_IsObject(root) && pick(root, K_PRICE)) rec = root;
+        else cJSON_ArrayForEach(it, root) { if (cJSON_IsObject(it) && pick(it, K_PRICE)) { rec = it; break; } }
+    }
+    if (!rec) {
+        snprintf(err, err_len, "Unrecognized quote reply");
+        cJSON_Delete(root);
+        return false;
+    }
+
+    int n = 0;
+    if (!add_quote(rec, &out->q, 1, &n)) {           /* no symbol in the record: use ours */
+        cJSON *copy = cJSON_Duplicate(rec, true);
+        cJSON_AddStringToObject(copy, "Symbol", sym);
+        add_quote(copy, &out->q, 1, &n);
+        cJSON_Delete(copy);
+    }
+    out->has_high       = to_double(pick(rec, K_HIGH), &out->high);
+    out->has_low        = to_double(pick(rec, K_LOW), &out->low);
+    out->has_open       = to_double(pick(rec, K_OPEN), &out->open);
+    out->has_prev_close = to_double(pick(rec, K_PREV), &out->prev_close);
+    out->has_volume     = to_double(pick(rec, K_VOLUME), &out->volume);
+    cJSON_Delete(root);
+
+    if (n == 0 || !out->q.has_price) {
+        snprintf(err, err_len, "Unrecognized quote reply");
+        return false;
+    }
+    if (out->q.price == 0 && (!out->has_prev_close || out->prev_close == 0)) {
+        snprintf(err, err_len, "No quote for %s", sym);   /* unknown ticker: all zeros */
+        return false;
+    }
+    return true;
 }

@@ -49,3 +49,9 @@ LV_FONT_DECLARE(ui_icons_56)
 #define ICON_PLAY       "\xEF\x81\x8B"   /* U+F04B */
 #define ICON_LIST       "\xEF\x80\xBA"   /* U+F03A */
 #define ICON_TRASH      "\xEF\x87\xB8"   /* U+F1F8 */
+#define ICON_BATTERY_FULL "\xEF\x89\x80"   /* U+F240 */
+#define ICON_BATTERY_3Q "\xEF\x89\x81"   /* U+F241 */
+#define ICON_BATTERY_HALF "\xEF\x89\x82"   /* U+F242 */
+#define ICON_BATTERY_1Q "\xEF\x89\x83"   /* U+F243 */
+#define ICON_BATTERY_EMPTY "\xEF\x89\x84"   /* U+F244 */
+#define ICON_BOLT       "\xEF\x83\xA7"   /* U+F0E7 */

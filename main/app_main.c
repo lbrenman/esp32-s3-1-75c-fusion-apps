@@ -5,7 +5,7 @@
  *                ├─ Stocks      (watchlist client for the FusionStockWatchListMCP server)
  *                └─ Settings    (Wi-Fi, dark mode, brightness, volume, reset)
  *
- * Boot order: settings (NVS) -> display + UI -> audio -> stocks engine -> Wi-Fi.
+ * Boot order: settings (NVS) -> display -> battery -> UI -> audio -> stocks engine -> Wi-Fi.
  * Apps live in main/apps/, shared UI pieces in main/ui/.
  */
 
@@ -21,6 +21,7 @@
 #include "net.h"
 #include "voice.h"
 #include "stocks.h"
+#include "power.h"
 #include "apps.h"
 #include "ui_theme.h"
 #include "ui_nav.h"
@@ -42,6 +43,7 @@ void app_main(void)
         return;
     }
     bsp_display_brightness_set(cfg.brightness);
+    power_init();                     /* battery level (AXP2101 on the I2C bus the display started) */
 
     bsp_display_lock(-1);
     ui_theme_init(disp, cfg.dark_mode);

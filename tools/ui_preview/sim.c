@@ -11,6 +11,7 @@
 #include "voice.h"
 #include "net.h"
 #include "stocks.h"
+#include "power.h"
 
 #define W 466
 extern int64_t g_sim_us;
@@ -20,6 +21,7 @@ extern uint32_t g_ver;
 extern bool g_vactive;
 extern net_state_t g_net;
 extern stocks_snapshot_t g_ss;
+extern power_info_t g_power;
 void stocks_fake_load(int n);
 void stocks_fake_finish(void);
 void stocks_bump(void);
@@ -298,5 +300,20 @@ int main(void)
     swipe(110, 250, 360, 250);
     printf("stocks active should be 0 now\n");
     shot("59_home_light_three_apps");
+
+    /* ---- battery states on Home (dark) + Settings > System */
+    ui_theme_set_dark(true); ui_nav_refresh(); step(300);
+    g_power.usb = true; g_power.charging = true; g_power.percent = 64;
+    step(1200); shot("60_home_charging");
+    g_power.charging = false; g_power.full = true; g_power.percent = 100;
+    step(1200); shot("61_home_full");
+    g_power.usb = false; g_power.full = false; g_power.percent = 12;
+    step(1200); shot("62_home_low");
+    g_power.battery = false; g_power.usb = true; g_power.percent = -1;
+    step(1200); shot("63_home_no_battery");
+    g_power.battery = true; g_power.usb = true; g_power.charging = true; g_power.percent = 64;
+    tap_text("Settings");
+    swipe(233, 400, 233, 60); swipe(233, 400, 233, 60); swipe(233, 400, 233, 60);
+    step(1200); shot("64_settings_system");
     return 0;
 }

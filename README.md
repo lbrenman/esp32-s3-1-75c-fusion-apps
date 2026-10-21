@@ -24,13 +24,13 @@ the device.*
 
 | Screen | What it does |
 | --- | --- |
-| **Home** | Date and time (from NTP), app icons, Wi-Fi status, day/night button |
+| **Home** | Battery level and charging state, date and time (from NTP), app icons, Wi-Fi status, day/night button |
 | **Voice chat** | Hold to talk, release to send. Shows what the server heard and its reply, plays the reply audio |
 | **Voice server** (swipe up/down in Voice chat) | See and change the server URL and API key, connect/disconnect switch with status, reset URL to `secrets.h` |
 | **Stocks** | Your watchlist: symbol, company, price, change and % change, colored green or red. Refreshes every minute while open; the ↻ / ❚❚ button pauses and resumes auto refresh |
 | **Pick symbols** (+ or swipe left in Stocks) | Tabs of preset symbols (**QQQ 1**, **QQQ 2**, **Blue Chip**) and **Other** (watchlist symbols not on a tab, e.g. added from Claude). Tap to add (green) or remove (gray) |
 | **Stock server** (gear in Stocks) | See and change the MCP server URL and API key, connection status, refresh now, reset URL to `secrets.h` |
-| **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new), restart, reset |
+| **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new), battery (%, state, voltage), version and free memory, restart, reset |
 
 ### Gestures
 
@@ -75,6 +75,36 @@ Wi-Fi joins the **strongest** access point with your network name (it scans all 
 which matters on mesh networks and with extenders. The log shows which one:
 `net: Wi-Fi connected, IP ..., AP xx:xx:..., channel N, -NN dBm`. The choice is made when Wi-Fi
 connects; the board doesn't switch access points while it stays connected.
+
+### Battery
+
+The battery level comes from the board's AXP2101 power chip (I2C address 0x34, read every 2 s).
+
+| Home shows | Meaning |
+| --- | --- |
+| battery icon + 87% (gray) | On battery |
+| battery icon + 12% (red) | On battery, 15 % or less |
+| green bolt + battery + 64% | Charging |
+| green plug + battery + 100% | On USB, charging finished |
+| plug + USB | USB power, no battery connected |
+| (nothing) | The power chip didn't answer; the log says `power: AXP2101 not found` |
+
+**Settings > System > Battery** adds the state in words and the battery voltage. The percentage is
+the chip's own fuel gauge; it can take a few charge cycles to settle after a new battery goes in.
+
+### Memory
+
+**Settings > System** shows `Free: RAM 50 KB • PSRAM 7.1 MB`, refreshed every second:
+
+- **RAM** is the ESP32-S3's internal memory (512 KB in total). It's the one that runs short:
+  tasks, Wi-Fi, LVGL and the display's DMA transfers need it. About 50 KB free is normal with
+  Wi-Fi up, and most of it is the 48 KB that `sdkconfig.defaults` keeps reserved for the display
+  (`CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL`). Around 20 KB or less, or
+  `Draw bitmap failed: ESP_ERR_NO_MEM` in the log, means something is using too much.
+- **PSRAM** is the 8 MB external memory. Big buffers (audio, TLS, quotes) go there.
+
+The boot log has the same numbers plus the largest free DMA block:
+`app: Free memory: internal NN KB (largest DMA block NN KB), PSRAM NNNN KB`.
 
 ### The Stocks app
 
@@ -170,12 +200,13 @@ esp32-s3-1-75c-fusion-apps/
 ├── sdkconfig.fusion_apps          just this project's settings, for reference
 ├── components/bsp_extra/          Waveshare's audio helper (codec, I2S, speaker amp)
 ├── main/
-│   ├── app_main.c                 boot: settings -> display/UI -> audio -> stocks engine -> Wi-Fi
+│   ├── app_main.c                 boot: settings -> display -> battery -> UI -> audio -> stocks engine -> Wi-Fi
 │   ├── app_config.h               compiled-in options: time zone, 12/24 h clock, animation time...
 │   ├── settings_store.c/.h        settings in NVS, defaults from secrets.h
 │   ├── net.c/.h                   Wi-Fi station, scanning, NTP clock
 │   ├── mcp_client.c/.h            small MCP client: Streamable HTTP, sessions, SSE replies
 │   ├── text_ascii.c/.h            turns ’ “ ” – é ... into ASCII the built-in fonts can draw
+│   ├── power.c/.h                 battery level and charging from the AXP2101 power chip
 │   ├── secrets.h.example          copy to secrets.h (gitignored)
 │   ├── minimp3.h, minimp3_impl.c  MP3 decoder (CC0)
 │   ├── ui/
@@ -405,7 +436,7 @@ rm sdkconfig && idf.py -p /dev/cu.usbmodem1101 build flash monitor
 ## Troubleshooting
 
 Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app`, `settings`,
-`net`, `voice`, `stocks`, `mcp`.
+`net`, `voice`, `stocks`, `mcp`, `power`.
 
 | Symptom / log | Likely cause | Fix |
 | --- | --- | --- |
@@ -433,3 +464,4 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app
 | Pick: a button stays green after a remove | The server had the symbol twice and removed one copy | Tap it again |
 | Pick: "Still loading the watchlist..." | Taps wait until the symbol list has loaded once | Wait for the status line to show the count |
 | A name shows ' where the real one has ’ (e.g. an iPhone hotspot "Leor's iPhone") | The built-in fonts are ASCII-only, so Wi-Fi names, stock names and voice replies are shown with ASCII look-alikes | Nothing to fix: the real name is what's saved and joined |
+| No battery level on Home | The AXP2101 didn't answer on I2C (`power:` lines in the log) | Check the log line; the rest of the app works without it |

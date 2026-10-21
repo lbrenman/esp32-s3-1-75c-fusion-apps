@@ -7,16 +7,17 @@
 #include "net.h"
 #include "voice.h"
 #include "stocks.h"
+#include "power.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 
 int64_t g_sim_us = 0;
 int64_t esp_timer_get_time(void) { return g_sim_us; }
 void esp_restart(void) { printf("RESTART\n"); }
-size_t heap_caps_get_free_size(unsigned c) { return 187 * 1024; }
+size_t heap_caps_get_free_size(unsigned c) { return c & MALLOC_CAP_SPIRAM ? 7372 * 1024 : 52 * 1024; }
 esp_err_t bsp_display_brightness_set(int p) { printf("brightness %d\n", p); return 0; }
 
-static app_settings_t s = { "Leor Brenman\xE2\x80\x99s iPhone 15 Pro", "example-password", "wss://voice.example.com:4443/ws/speech",
+static app_settings_t s = { "Home-WiFi", "example-password", "wss://voice.example.com:4443/ws/speech",
                             "example-api-key-abcd", 1, 80, 75, "3f2a9c1e-7b4d-4e21-9a6f-0c8d5e11c11e",
                             "https://fusion.example.com:4443/FusionStockWatchListMCP", "example-mcp-key-wxyz", 1 };
 void settings_init(void) {}
@@ -40,7 +41,7 @@ bool net_ip(char *b, size_t l) { snprintf(b, l, "192.168.1.42"); return true; }
 int net_rssi(void) { return -54; }
 int net_last_reason(void) { return 0; }
 bool net_time_valid(void) { return true; }
-static net_ap_t aps[] = { {"Leor Brenman\xE2\x80\x99s iPhone 15 Pro", -42, true}, {"Home-WiFi", -48, true}, {"Guest-WiFi", -61, true}, {"xfinitywifi", -72, false}, {"NETGEAR-5G", -83, true} };
+static net_ap_t aps[] = { {"Pat\xE2\x80\x99s iPhone", -42, true}, {"Home-WiFi", -48, true}, {"Guest-WiFi", -61, true}, {"xfinitywifi", -72, false}, {"NETGEAR-5G", -83, true} };
 int g_scan_polls = 0;
 void net_scan_start(void) { g_scan_polls = 0; }
 bool net_scan_result(const net_ap_t **a, int *n) { if (++g_scan_polls < 5) return false; *a = aps; *n = 5; return true; }
@@ -142,3 +143,8 @@ void stocks_fake_finish(void)
 }
 uint32_t stocks_version(void) { return g_ss_ver; }
 void stocks_get(stocks_snapshot_t *o) { *o = g_ss; }
+
+/* ---- battery (sim.c changes g_power to preview other states) */
+power_info_t g_power = { true, true, 87, 4012, false, false, false };
+void power_init(void) {}
+void power_get(power_info_t *out) { *out = g_power; }

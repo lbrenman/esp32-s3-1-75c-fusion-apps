@@ -26,6 +26,8 @@ ICONS = [
     ("SIGNAL", 0xF012), ("WAVE", 0xF83E), ("HAND", 0xF256), ("ROBOT", 0xF544),
     ("CHART", 0xF201), ("PLUS", 0x2B), ("PAUSE", 0xF04C), ("PLAY", 0xF04B),
     ("LIST", 0xF03A), ("TRASH", 0xF1F8),
+    ("BATTERY_FULL", 0xF240), ("BATTERY_3Q", 0xF241), ("BATTERY_HALF", 0xF242),
+    ("BATTERY_1Q", 0xF243), ("BATTERY_EMPTY", 0xF244), ("BOLT", 0xF0E7),
 ]
 
 

@@ -14,11 +14,14 @@
 #include "stocks.h"
 #include "app_config.h"
 #include "text_ascii.h"
+#include "power.h"
 
 static lv_obj_t   *s_scr;
 static lv_obj_t   *s_list;
 static ui_row_t    s_net_row;
 static ui_row_t    s_status_row;
+static ui_row_t    s_batt_row;
+static ui_row_t    s_about_row;
 static lv_timer_t *s_timer;
 static int32_t     s_keep_scroll = -1;   /* restore the scroll position after a theme rebuild */
 
@@ -69,7 +72,45 @@ static void refresh_rows(void)
     lv_obj_set_style_bg_color(icon_box, lv_color_hex(c), 0);
 }
 
-static void tick_cb(lv_timer_t *t) { refresh_rows(); }
+/* "Free: RAM 50 KB • PSRAM 7.2 MB" (internal RAM is the scarce one: see README, "Memory") */
+static void memory_text(char *buf, size_t len)
+{
+    unsigned ram_kb = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+    unsigned psram_kb = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
+    snprintf(buf, len, "Free: RAM %u KB \xE2\x80\xA2 PSRAM %u.%u MB", ram_kb, psram_kb / 1024,
+             (psram_kb % 1024) * 10 / 1024);
+}
+
+static void battery_text(char *buf, size_t len, uint32_t *color)
+{
+    power_info_t p;
+    power_get(&p);
+    *color = UI_C_GREEN;
+    if (!p.available)       { snprintf(buf, len, "Power chip not found"); *color = UI_C_GRAY; return; }
+    if (!p.battery)         { snprintf(buf, len, p.usb ? "No battery \xE2\x80\xA2 USB power" : "No battery"); *color = UI_C_GRAY; return; }
+    const char *state = p.charging ? "Charging" : p.full ? "Full" : p.usb ? "On USB power" : "On battery";
+    snprintf(buf, len, "%d%% \xE2\x80\xA2 %s \xE2\x80\xA2 %d.%02d V", p.percent < 0 ? 0 : p.percent, state,
+             p.millivolts / 1000, (p.millivolts % 1000) / 10);
+    if (!p.usb && p.percent >= 0 && p.percent <= 15) *color = UI_C_RED;
+    else if (!p.usb && p.percent >= 0 && p.percent <= 30) *color = UI_C_ORANGE;
+}
+
+static void refresh_system_rows(void)
+{
+    char buf[80];
+    uint32_t c;
+    battery_text(buf, sizeof(buf), &c);
+    lv_label_set_text(s_batt_row.value, buf);
+    lv_obj_set_style_bg_color(lv_obj_get_child(s_batt_row.row, 0), lv_color_hex(c), 0);
+    memory_text(buf, sizeof(buf));
+    lv_label_set_text(s_about_row.value, buf);
+}
+
+static void tick_cb(lv_timer_t *t)
+{
+    refresh_rows();
+    if (s_scr) refresh_system_rows();
+}
 
 static void delete_cb(lv_event_t *e)
 {
@@ -383,10 +424,9 @@ static lv_obj_t *settings_build(void *arg)
     ui_row(list, ICON_PEN, UI_C_PURPLE, "New conversation", NULL, new_conv_cb, NULL);
 
     ui_section(list, "SYSTEM");
-    char about[64];
-    snprintf(about, sizeof(about), "v%s  -  %u KB free", APP_VERSION,
-             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
-    ui_row(list, ICON_INFO, UI_C_GRAY, APP_NAME, about, NULL, NULL);
+    s_batt_row = ui_row(list, ICON_BATTERY_3Q, UI_C_GREEN, "Battery", "", NULL, NULL);
+    s_about_row = ui_row(list, ICON_INFO, UI_C_GRAY, APP_NAME " v" APP_VERSION, "", NULL, NULL);
+    refresh_system_rows();
     ui_row(list, ICON_POWER, UI_C_TEAL, "Restart", NULL, restart_cb, NULL);
     ui_row(list, ICON_RESET, UI_C_RED, "Reset settings", NULL, reset_cb, NULL);
 

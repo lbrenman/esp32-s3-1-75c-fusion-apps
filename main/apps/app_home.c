@@ -9,6 +9,7 @@
 #include "settings_store.h"
 #include "app_config.h"
 #include "text_ascii.h"
+#include "power.h"
 
 static lv_obj_t   *s_scr;
 static lv_obj_t   *s_time;
@@ -16,6 +17,10 @@ static lv_obj_t   *s_ampm;
 static lv_obj_t   *s_date;
 static lv_obj_t   *s_wifi_icon;
 static lv_obj_t   *s_wifi_text;
+static lv_obj_t   *s_batt;          /* top: [bolt/plug] [battery icon] 87% */
+static lv_obj_t   *s_batt_state;
+static lv_obj_t   *s_batt_icon;
+static lv_obj_t   *s_batt_text;
 static lv_timer_t *s_timer;
 
 static void update_clock(void)
@@ -70,8 +75,61 @@ static void update_wifi(void)
     }
 }
 
+static const char *battery_icon(int pct)
+{
+    if (pct >= 88) return ICON_BATTERY_FULL;
+    if (pct >= 63) return ICON_BATTERY_3Q;
+    if (pct >= 38) return ICON_BATTERY_HALF;
+    if (pct >= 13) return ICON_BATTERY_1Q;
+    return ICON_BATTERY_EMPTY;
+}
+
+/* Battery at the top: green bolt while charging, plug when full or on USB without a battery,
+ * red when 15 % or lower on battery. Hidden if the power chip didn't answer. */
+static void update_battery(void)
+{
+    power_info_t p;
+    power_get(&p);
+    if (!p.available) {
+        lv_obj_add_flag(s_batt, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_obj_remove_flag(s_batt, LV_OBJ_FLAG_HIDDEN);
+
+    char buf[16];
+    if (!p.battery) {
+        lv_label_set_text(s_batt_state, ICON_PLUG);
+        lv_obj_set_style_text_color(s_batt_state, ui_pal.text_dim, 0);
+        lv_obj_remove_flag(s_batt_state, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_batt_icon, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(s_batt_text, "USB");
+        lv_obj_set_style_text_color(s_batt_text, ui_pal.text_dim, 0);
+        return;
+    }
+    lv_obj_remove_flag(s_batt_icon, LV_OBJ_FLAG_HIDDEN);
+    bool low = p.percent >= 0 && p.percent <= 15 && !p.usb;
+    lv_color_t c = p.charging || p.full ? ui_pal.ok : (low ? ui_pal.err : ui_pal.text_dim);
+    lv_label_set_text(s_batt_icon, battery_icon(p.percent < 0 ? 0 : p.percent));
+    lv_obj_set_style_text_color(s_batt_icon, c, 0);
+
+    if (p.charging)  lv_label_set_text(s_batt_state, ICON_BOLT);
+    else if (p.usb)  lv_label_set_text(s_batt_state, ICON_PLUG);
+    if (p.charging || p.usb) {
+        lv_obj_set_style_text_color(s_batt_state, ui_pal.ok, 0);
+        lv_obj_remove_flag(s_batt_state, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_batt_state, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    if (p.percent >= 0) snprintf(buf, sizeof(buf), "%d%%", p.percent);
+    else                snprintf(buf, sizeof(buf), "--%%");
+    lv_label_set_text(s_batt_text, buf);
+    lv_obj_set_style_text_color(s_batt_text, low ? ui_pal.err : ui_pal.text_dim, 0);
+}
+
 static void tick_cb(lv_timer_t *t)
 {
+    update_battery();
     update_clock();
     update_wifi();
 }
@@ -129,6 +187,19 @@ lv_obj_t *home_build(void *arg)
 {
     lv_obj_t *scr = ui_screen();
     s_scr = scr;
+
+    /* battery, at the very top */
+    s_batt = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_batt);
+    lv_obj_remove_flag(s_batt, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(s_batt, LV_SIZE_CONTENT, 22);
+    lv_obj_set_flex_flow(s_batt, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_batt, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(s_batt, 5, 0);
+    lv_obj_align(s_batt, LV_ALIGN_TOP_MID, 0, 22);
+    s_batt_state = ui_icon(s_batt, &ui_icons_16, ui_pal.ok, ICON_BOLT);
+    s_batt_icon = ui_icon(s_batt, &ui_icons_20, ui_pal.text_dim, ICON_BATTERY_FULL);
+    s_batt_text = ui_label(s_batt, &lv_font_montserrat_14, ui_pal.text_dim, "");
 
     /* date + time */
     s_date = ui_label(scr, &lv_font_montserrat_16, ui_pal.text_dim, "");
@@ -189,6 +260,7 @@ lv_obj_t *home_build(void *arg)
 
     update_clock();
     update_wifi();
+    update_battery();
     if (s_timer) lv_timer_delete(s_timer);
     s_timer = lv_timer_create(tick_cb, 1000, NULL);
     lv_obj_add_event_cb(scr, delete_cb, LV_EVENT_DELETE, NULL);

@@ -282,6 +282,32 @@ static void volume_cb(lv_event_t *e)
     }
 }
 
+static void conv_label(char *buf, size_t len)
+{
+    app_settings_t cfg;
+    settings_get(&cfg);
+    /* first and last block of the UUID are enough to tell conversations apart */
+    snprintf(buf, len, "%.8s...%s", cfg.conversation_id,
+             strlen(cfg.conversation_id) > 12 ? cfg.conversation_id + strlen(cfg.conversation_id) - 4 : "");
+}
+
+static ui_row_t s_conv_row;
+
+static void do_new_conversation(void *user)
+{
+    voice_new_conversation();
+    char buf[32];
+    conv_label(buf, sizeof(buf));
+    if (s_scr) lv_label_set_text(s_conv_row.value, buf);
+    ui_toast("New conversation started");
+}
+
+static void new_conv_cb(lv_event_t *e)
+{
+    ui_confirm("New conversation?", "The voice server starts fresh and forgets what you talked about.",
+               "Start new", false, do_new_conversation, NULL);
+}
+
 static void do_restart(void *user) { esp_restart(); }
 
 static void restart_cb(lv_event_t *e)
@@ -334,6 +360,12 @@ static lv_obj_t *settings_build(void *arg)
 
     ui_section(list, "SOUND");
     ui_row_slider(list, ICON_VOLUME, UI_C_RED, "Volume", 0, 100, cfg.volume, volume_cb, NULL);
+
+    ui_section(list, "VOICE CHAT");
+    char conv[32];
+    conv_label(conv, sizeof(conv));
+    s_conv_row = ui_row(list, ICON_COMMENT, UI_C_PURPLE, "Conversation", conv, NULL, NULL);
+    ui_row(list, ICON_PEN, UI_C_PURPLE, "New conversation", NULL, new_conv_cb, NULL);
 
     ui_section(list, "SYSTEM");
     char about[64];

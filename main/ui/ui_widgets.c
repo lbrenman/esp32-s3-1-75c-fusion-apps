@@ -276,6 +276,24 @@ lv_obj_t *ui_row_switch(lv_obj_t *list, const char *icon, uint32_t icon_color, c
     return sw;
 }
 
+ui_toggle_row_t ui_row_toggle(lv_obj_t *list, const char *icon, uint32_t icon_color, const char *title,
+                              const char *value, bool on, lv_event_cb_t on_change, void *user)
+{
+    ui_toggle_row_t r;
+    r.row = row_base(list, icon, icon_color, false);
+    lv_obj_t *col = text_col(r.row);
+    ui_label(col, &lv_font_montserrat_16, ui_pal.text, title);
+    r.value = ui_label(col, &lv_font_montserrat_14, ui_pal.text_dim, value);
+    lv_obj_set_width(r.value, LV_PCT(100));
+    lv_label_set_long_mode(r.value, LV_LABEL_LONG_MODE_DOTS);
+    r.sw = lv_switch_create(r.row);
+    lv_obj_set_size(r.sw, 56, 32);
+    lv_obj_remove_flag(r.sw, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    if (on) lv_obj_add_state(r.sw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(r.sw, on_change, LV_EVENT_VALUE_CHANGED, user);
+    return r;
+}
+
 static void slider_label_cb(lv_event_t *e)
 {
     lv_obj_t *s = lv_event_get_target_obj(e);

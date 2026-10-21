@@ -51,7 +51,14 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *e = (ip_event_got_ip_t *)data;
-        ESP_LOGI(TAG, "Wi-Fi connected, IP " IPSTR, IP2STR(&e->ip_info.ip));
+        wifi_ap_record_t ap;
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            ESP_LOGI(TAG, "Wi-Fi connected, IP " IPSTR ", AP %02x:%02x:%02x:%02x:%02x:%02x, channel %d, %d dBm",
+                     IP2STR(&e->ip_info.ip), ap.bssid[0], ap.bssid[1], ap.bssid[2], ap.bssid[3], ap.bssid[4],
+                     ap.bssid[5], ap.primary, ap.rssi);
+        } else {
+            ESP_LOGI(TAG, "Wi-Fi connected, IP " IPSTR, IP2STR(&e->ip_info.ip));
+        }
         s_state = NET_UP;
         s_last_reason = 0;
         sntp_start_once();
@@ -66,6 +73,10 @@ static void apply_config(void)
     wifi_config_t wc = { 0 };
     strlcpy((char *)wc.sta.ssid, cfg.wifi_ssid, sizeof(wc.sta.ssid));
     strlcpy((char *)wc.sta.password, cfg.wifi_pass, sizeof(wc.sta.password));
+    /* Networks with several access points (mesh, extenders) share one name: scan every channel and
+     * join the strongest one instead of the first one found. */
+    wc.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wc.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
 
     if (cfg.wifi_ssid[0] == '\0') {
@@ -131,6 +142,19 @@ int net_rssi(void)
 bool net_time_valid(void)
 {
     return time(NULL) > 1700000000;      /* anything after Nov 2023 means NTP has run */
+}
+
+void net_set_power_save(bool on)
+{
+    static int s_ps = -1;                    /* unknown at boot (the driver default is on) */
+    if (s_ps == (int)on) return;
+    esp_err_t err = esp_wifi_set_ps(on ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+    if (err == ESP_OK) {
+        s_ps = on;
+        ESP_LOGI(TAG, "Wi-Fi power saving %s", on ? "on" : "off");
+    } else {
+        ESP_LOGW(TAG, "esp_wifi_set_ps failed: %s", esp_err_to_name(err));
+    }
 }
 
 /* ------------------------------------------------------------------- scanning */

@@ -1,9 +1,11 @@
+#include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "esp_random.h"
 
 #include "settings_store.h"
 #include "app_config.h"
@@ -25,6 +27,17 @@ static SemaphoreHandle_t s_mtx;
 
 const char *settings_default_url(void) { return s_default_url; }
 const char *settings_build_host(void)  { return WS_HOST; }
+
+static void make_uuid(char *out /* SET_CONV_LEN + 1 bytes */)
+{
+    uint8_t b[16];
+    esp_fill_random(b, sizeof(b));
+    b[6] = (b[6] & 0x0F) | 0x40;   /* version 4 */
+    b[8] = (b[8] & 0x3F) | 0x80;   /* variant */
+    snprintf(out, SET_CONV_LEN + 1, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+             b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+             b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+}
 
 static void load_defaults(app_settings_t *s)
 {
@@ -71,6 +84,7 @@ void settings_init(void)
         get_str(h, "pass",   s_cur.wifi_pass,  sizeof(s_cur.wifi_pass));
         get_str(h, "url",    s_cur.ws_url,     sizeof(s_cur.ws_url));
         get_str(h, "apikey", s_cur.ws_api_key, sizeof(s_cur.ws_api_key));
+        get_str(h, "conv",   s_cur.conversation_id, sizeof(s_cur.conversation_id));
         get_u8(h, "dark",   &dark);
         get_u8(h, "bright", &s_cur.brightness);
         get_u8(h, "vol",    &s_cur.volume);
@@ -83,6 +97,24 @@ void settings_init(void)
     if (s_cur.brightness < 5)   s_cur.brightness = 5;
     if (s_cur.brightness > 100) s_cur.brightness = 100;
     if (s_cur.volume > 100)     s_cur.volume = 100;
+
+    /* first start (or after a reset): make the conversation ID and keep it */
+    if (strlen(s_cur.conversation_id) != SET_CONV_LEN) {
+        settings_new_conversation(NULL, 0);
+    } else {
+        ESP_LOGI(TAG, "Conversation %s", s_cur.conversation_id);
+    }
+}
+
+esp_err_t settings_new_conversation(char *out, size_t out_len)
+{
+    app_settings_t s;
+    settings_get(&s);
+    make_uuid(s.conversation_id);
+    esp_err_t err = settings_set(&s);
+    ESP_LOGI(TAG, "New conversation %s", s.conversation_id);
+    if (out && out_len) strlcpy(out, s.conversation_id, out_len);
+    return err;
 }
 
 void settings_get(app_settings_t *out)
@@ -111,6 +143,7 @@ esp_err_t settings_set(const app_settings_t *in)
     if (strcmp(old.wifi_pass, in->wifi_pass))   err |= nvs_set_str(h, "pass", in->wifi_pass);
     if (strcmp(old.ws_url, in->ws_url))         err |= nvs_set_str(h, "url", in->ws_url);
     if (strcmp(old.ws_api_key, in->ws_api_key)) err |= nvs_set_str(h, "apikey", in->ws_api_key);
+    if (strcmp(old.conversation_id, in->conversation_id)) err |= nvs_set_str(h, "conv", in->conversation_id);
     if (old.dark_mode != in->dark_mode)         err |= nvs_set_u8(h, "dark", in->dark_mode ? 1 : 0);
     if (old.brightness != in->brightness)       err |= nvs_set_u8(h, "bright", in->brightness);
     if (old.volume != in->volume)               err |= nvs_set_u8(h, "vol", in->volume);
@@ -133,5 +166,6 @@ esp_err_t settings_reset(void)
     load_defaults(&s_cur);
     xSemaphoreGive(s_mtx);
     ESP_LOGI(TAG, "Settings reset to defaults");
+    settings_new_conversation(NULL, 0);    /* a reset also starts a new conversation */
     return ESP_OK;
 }

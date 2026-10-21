@@ -20,6 +20,7 @@
 #include <stdarg.h>
 #include <strings.h>
 #include <ctype.h>
+#include <errno.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -41,6 +42,7 @@
 #include "voice.h"
 #include "net.h"
 #include "settings_store.h"
+#include "app_config.h"
 
 /* minimp3: public-domain (CC0) MP3 decoder, implementation compiled in minimp3_impl.c */
 #define MINIMP3_ONLY_MP3
@@ -67,6 +69,7 @@ extern const char server_ca_pem_start[] asm("_binary_server_ca_pem_start");
 #define HEARD_MAX_CHARS     200
 #define REPLY_MAX_CHARS     320             // what fits on the round screen
 #define NOTE_MAX_CHARS      96
+#define RESEND_WAIT_MS      20000           // after a failed send: wait this long for the reconnect, then resend once
 
 /* ------------------------------------------------------------------- state */
 typedef struct {
@@ -78,7 +81,10 @@ enum { CMD_WAKE = 1, CMD_RESTART = 2 };
 
 static volatile voice_state_t s_state = VOICE_OFF;
 static volatile bool    s_active = false;           // the app is open
+static volatile bool    s_want = true;              // connection switch (Voice server screen); on by default
+#define LIVE()          (s_active && s_want)        // app open and connection wanted
 static volatile bool    s_recording = false;
+static volatile bool    s_resending = false;        // a failed send is waiting for the reconnect
 static volatile bool    s_rec_cancel = false;       // set by a swipe: discard the recording
 static volatile bool    s_ws_connected = false;
 static volatile bool    s_got_text = false;
@@ -190,8 +196,104 @@ const char *voice_state_text(voice_state_t st)
     case VOICE_THINKING:   return "Thinking...";
     case VOICE_SPEAKING:   return "Speaking...";
     case VOICE_ERROR:      return "Not connected";
+    case VOICE_DISCONNECTED: return "Disconnected";
     }
     return "";
+}
+
+/* -------------------------------------------------------- diagnostics
+ * One-line connection health snapshots under the "vdiag" tag, so a serial log of a session
+ * shows when and why the link dropped. Never logs the URL query (API key). */
+#define DTAG "vdiag"
+
+typedef struct {
+    int      attempts, connects, drops;
+    int64_t  attempt_us;          /* when the current connect attempt started */
+    int64_t  connected_us;        /* when the link came up (0 = down) */
+    int64_t  last_rx_us, last_tx_us, last_pong_us, last_ping_us;
+    uint32_t rx_frames, tx_frames, pongs, pings;
+    uint64_t rx_bytes, tx_bytes;
+    int64_t  last_beat_us;
+} vdiag_t;
+
+static vdiag_t s_dg;
+
+/* seconds since t, as text ("-" if never) */
+static const char *ago(int64_t t, char *buf, size_t len)
+{
+    if (t <= 0) { snprintf(buf, len, "-"); return buf; }
+    snprintf(buf, len, "%.1fs", (esp_timer_get_time() - t) / 1e6);
+    return buf;
+}
+
+static const char *net_name(void)
+{
+    switch (net_state()) {
+    case NET_UP:         return "up";
+    case NET_CONNECTING: return "connecting";
+    default:             return "not-set";
+    }
+}
+
+static void diag(const char *why)
+{
+#if VOICE_DIAG
+    char a[16], b[16], c[16], d[16], e[16];
+    ESP_LOGI(DTAG, "%s | state=%s want=%d active=%d link=%d up=%s | last rx %s tx %s pong %s ping %s"
+             " | rx %u msgs %u KB, tx %u msgs %u KB | wifi %s %d dBm | heap int %u KB (dma blk %u KB) psram %u KB",
+             why, voice_state_text(s_state), s_want, s_active, s_ws_connected,
+             ago(s_dg.connected_us, a, sizeof(a)),
+             ago(s_dg.last_rx_us, b, sizeof(b)), ago(s_dg.last_tx_us, c, sizeof(c)),
+             ago(s_dg.last_pong_us, d, sizeof(d)), ago(s_dg.last_ping_us, e, sizeof(e)),
+             (unsigned)s_dg.rx_frames, (unsigned)(s_dg.rx_bytes / 1024),
+             (unsigned)s_dg.tx_frames, (unsigned)(s_dg.tx_bytes / 1024),
+             net_name(), net_rssi(),
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) / 1024),
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+#endif
+}
+
+static const char *ws_err_type_name(int t)
+{
+    switch (t) {   /* numeric: older esp_websocket_client versions lack some enum names */
+    case 0: return "none";
+    case 1: return "TCP/TLS transport";
+    case 2: return "pong timeout";
+    case 3: return "handshake";
+    case 4: return "server close";
+    default: return "unknown";
+    }
+}
+
+static void diag_error(const esp_websocket_event_data_t *d)
+{
+#if VOICE_DIAG
+    const esp_websocket_error_codes_t *eh = &d->error_handle;
+    int t = (int)eh->error_type;
+    if (t < 1 || t > 4) {
+        /* the library fills these in for connect/handshake/pong errors, not for a failed write */
+        ESP_LOGW(DTAG, "ERROR: no details from the library (see the websocket_client line above)");
+        diag("after ERROR");
+        return;
+    }
+    ESP_LOGW(DTAG, "ERROR type=%d (%s) handshake_status=%d tls_err=0x%x (%s) tls_stack=-0x%04x cert_flags=0x%x sock_errno=%d (%s)",
+             (int)eh->error_type, ws_err_type_name((int)eh->error_type), eh->esp_ws_handshake_status_code,
+             (unsigned)eh->esp_tls_last_esp_err, esp_err_to_name(eh->esp_tls_last_esp_err),
+             (unsigned)(-eh->esp_tls_stack_err), (unsigned)eh->esp_tls_cert_verify_flags,
+             eh->esp_transport_sock_errno, eh->esp_transport_sock_errno ? strerror(eh->esp_transport_sock_errno) : "-");
+    diag("after ERROR");
+#endif
+}
+
+static void diag_heartbeat(void)
+{
+#if VOICE_DIAG && VOICE_DIAG_HEARTBEAT_S > 0
+    int64_t now = esp_timer_get_time();
+    if (!s_active || now - s_dg.last_beat_us < (int64_t)VOICE_DIAG_HEARTBEAT_S * 1000000) return;
+    s_dg.last_beat_us = now;
+    diag("heartbeat");
+#endif
 }
 
 /* ------------------------------------------------------------- helpers */
@@ -270,17 +372,6 @@ static void url_encode(const char *in, char *out, size_t out_len)
         }
     }
     out[o] = '\0';
-}
-
-static void make_uuid(char *out /* 37 bytes */)
-{
-    uint8_t b[16];
-    esp_fill_random(b, sizeof(b));
-    b[6] = (b[6] & 0x0F) | 0x40;   // version 4
-    b[8] = (b[8] & 0x3F) | 0x80;   // variant
-    snprintf(out, 37, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-             b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-             b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
 }
 
 /* Copies the host part of "wss://host:port/path?query" into out. */
@@ -447,12 +538,22 @@ static void handle_ws_data(const esp_websocket_event_data_t *d)
     if (d->op_code == 0x08) {   // close frame: first two bytes are the close code
         int code = (d->data_len >= 2) ? (((uint8_t)d->data_ptr[0] << 8) | (uint8_t)d->data_ptr[1]) : 0;
         ESP_LOGW(TAG, "Server closed the connection, code %d", code);
+#if VOICE_DIAG
+        char reason[96] = "";
+        int rlen = d->data_len > 2 ? d->data_len - 2 : 0;
+        if (rlen > (int)sizeof(reason) - 1) rlen = sizeof(reason) - 1;
+        if (rlen > 0) memcpy(reason, d->data_ptr + 2, rlen);
+        reason[rlen] = '\0';
+        ESP_LOGW(DTAG, "CLOSE frame from server: code=%d reason=\"%s\"", code, reason);
+        diag("after server CLOSE");
+#endif
         if (code == 1006) set_note("Server refused the connection - check the API key");
         else if (code == 1009) set_note("Recording too large for the server");
         else if (code == 1011) set_note("Server error (1011)");
         return;
     }
-    if (d->op_code == 0x09 || d->op_code == 0x0A) return;   // ping/pong
+    if (d->op_code == 0x0A) { s_dg.last_pong_us = esp_timer_get_time(); s_dg.pongs++; return; }  // pong
+    if (d->op_code == 0x09) { s_dg.last_ping_us = esp_timer_get_time(); s_dg.pings++; return; }  // ping from server
 
     if (d->op_code == 0x01 || d->op_code == 0x02) {
         if (d->payload_offset == 0) {
@@ -477,12 +578,18 @@ static void handle_ws_data(const esp_websocket_event_data_t *d)
     if (!frame_complete) return;
 
     s_last_rx_us = esp_timer_get_time();
+    s_dg.last_rx_us = s_last_rx_us;
+    s_dg.rx_frames++;
+    s_dg.rx_bytes += s_rx_len;
+#if VOICE_DIAG
+    ESP_LOGI(DTAG, "rx %s message, %u bytes", s_rx_op == 0x01 ? "text" : "binary", (unsigned)s_rx_len);
+#endif
 
     if (s_rx_op == 0x01) {
         if (!rx_reserve(s_rx_len + 1)) { s_rx_len = 0; return; }   // also covers empty frames
         s_rx_buf[s_rx_len] = '\0';
         handle_text((const char *)s_rx_buf);
-    } else if (s_rx_op == 0x02 && s_rx_len > 0 && s_active) {
+    } else if (s_rx_op == 0x02 && s_rx_len > 0 && LIVE()) {
         play_item_t item = {
             .data = heap_caps_malloc(s_rx_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
             .len = s_rx_len,
@@ -507,22 +614,45 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t id, void 
     case WEBSOCKET_EVENT_CONNECTED:
         ESP_LOGI(TAG, "WebSocket connected");
         s_ws_connected = true;
-        if (s_state == VOICE_CONNECTING || s_state == VOICE_ERROR || s_state == VOICE_WAIT_WIFI) {
+        s_dg.connects++;
+        s_dg.connected_us = esp_timer_get_time();
+        s_dg.last_pong_us = 0;
+        s_dg.last_beat_us = s_dg.connected_us;
+#if VOICE_DIAG
+        ESP_LOGI(DTAG, "CONNECTED #%d (attempt #%d) in %lld ms", s_dg.connects, s_dg.attempts,
+                 (long long)((s_dg.connected_us - s_dg.attempt_us) / 1000));
+        diag("on connect");
+#endif
+        if (s_want && !s_resending &&
+            (s_state == VOICE_CONNECTING || s_state == VOICE_ERROR || s_state == VOICE_WAIT_WIFI)) {
             set_note("%s", "");
             set_state(VOICE_READY);
         }
         break;
     case WEBSOCKET_EVENT_DISCONNECTED:
         ESP_LOGW(TAG, "WebSocket disconnected (will retry)");
+        if (s_ws_connected) s_dg.drops++;
+#if VOICE_DIAG
+        {
+            char buf[48];
+            snprintf(buf, sizeof(buf), "DISCONNECTED (drop #%d)", s_dg.drops);
+            diag(buf);
+        }
+#endif
         s_ws_connected = false;
-        if (s_state != VOICE_SPEAKING) set_state(VOICE_CONNECTING);
+        s_dg.connected_us = 0;
+        s_dg.attempt_us = esp_timer_get_time();   /* the client retries after reconnect_timeout_ms */
+        if (s_want && !s_resending && s_state != VOICE_SPEAKING) set_state(VOICE_CONNECTING);
         break;
     case WEBSOCKET_EVENT_CLOSED:
         ESP_LOGW(TAG, "WebSocket closed");
+        diag("CLOSED");
         s_ws_connected = false;
+        s_dg.connected_us = 0;
         break;
     case WEBSOCKET_EVENT_ERROR:
         ESP_LOGE(TAG, "WebSocket error (check URL, API key, TLS)");
+        diag_error(d);
         if (!s_ws_connected) set_note("Can't reach the server - check the URL");
         break;
     case WEBSOCKET_EVENT_DATA:
@@ -549,9 +679,9 @@ static void ws_start(void)
         return;
     }
 
-    char key_enc[3 * SET_KEY_MAX + 1], conv[37];
+    char key_enc[3 * SET_KEY_MAX + 1];
     url_encode(cfg.ws_api_key, key_enc, sizeof(key_enc));
-    make_uuid(conv);
+    const char *conv = cfg.conversation_id;    /* saved in settings; same for every turn and reconnect */
 
     const char *sep = strchr(cfg.ws_url, '?') ? "&" : "?";
     snprintf(s_url, sizeof(s_url), "%s%sx-api-key=%s&conversationId=%s", cfg.ws_url, sep, key_enc, conv);
@@ -590,6 +720,13 @@ static void ws_start(void)
     xSemaphoreGive(s_ws_mtx);
 
     set_state(VOICE_CONNECTING);
+    s_dg.attempts++;
+    s_dg.attempt_us = esp_timer_get_time();
+#if VOICE_DIAG
+    ESP_LOGI(DTAG, "connect attempt #%d to %s (ping every %d s, network timeout %d ms, reconnect after %d ms)",
+             s_dg.attempts, host, (int)wc.ping_interval_sec, wc.network_timeout_ms, wc.reconnect_timeout_ms);
+#endif
+    net_set_power_save(false);                /* full Wi-Fi speed while connected */
     esp_websocket_client_start(ws);
 }
 
@@ -602,18 +739,20 @@ static void ws_stop(void)
     if (!ws) return;
 
     ESP_LOGI(TAG, "Closing the WebSocket");
+    diag("closing (app/switch/idle)");
     if (esp_websocket_client_is_connected(ws)) {
         esp_websocket_client_close(ws, pdMS_TO_TICKS(2000));
     }
     esp_websocket_client_destroy(ws);
     s_ws_connected = false;
     s_rx_len = 0;
+    net_set_power_save(true);                 /* back to saving battery */
 }
 
 /* turn supervision: recover from replies that never come, or text-only replies */
 static void supervise(void)
 {
-    if (s_state != VOICE_THINKING) return;
+    if (s_state != VOICE_THINKING || s_resending) return;   /* the resend manages its own timing */
     int64_t now = esp_timer_get_time();
     if (s_got_text && uxQueueMessagesWaiting(s_play_q) == 0 && now - s_last_rx_us > TEXT_ONLY_IDLE_US) {
         set_state(VOICE_READY);
@@ -638,6 +777,14 @@ static void ctl_task(void *arg)
             ws_stop();
             continue;
         }
+        if (!s_want) {                       /* switched off, or idle timeout */
+            if (s_ws) {
+                ws_stop();
+                ESP_LOGI(TAG, "Disconnected");
+            }
+            if (s_state != VOICE_DISCONNECTED && s_state != VOICE_ERROR) set_state(VOICE_DISCONNECTED);
+            continue;
+        }
         if (!s_ws && !s_cfg_error) {
             if (!net_is_up()) {
                 if (s_state != VOICE_WAIT_WIFI) set_state(VOICE_WAIT_WIFI);
@@ -646,6 +793,18 @@ static void ctl_task(void *arg)
             ws_start();
         }
         supervise();
+        diag_heartbeat();
+
+#if VOICE_IDLE_DISCONNECT_MS > 0
+        /* close an idle connection, on any screen; tap the mic (or the switch) to reconnect */
+        if (s_state == VOICE_READY && voice_idle_us() > (int64_t)VOICE_IDLE_DISCONNECT_MS * 1000) {
+            ESP_LOGI(TAG, "Idle for %d min: disconnecting", VOICE_IDLE_DISCONNECT_MS / 60000);
+            s_want = false;
+            set_note("Disconnected after %d min idle", VOICE_IDLE_DISCONNECT_MS / 60000);
+            ws_stop();
+            set_state(VOICE_DISCONNECTED);
+        }
+#endif
     }
 }
 
@@ -655,6 +814,7 @@ void voice_set_active(bool active)
     if (active) {
         text_clear();
         s_cfg_error = false;
+        s_want = true;                       /* connection switch is on by default */
         s_active = true;
         s_last_activity_us = esp_timer_get_time();
         if (!s_audio_ok) {
@@ -675,9 +835,36 @@ void voice_set_active(bool active)
 void voice_reconnect(void)
 {
     uint32_t cmd = CMD_RESTART;
+    s_want = true;
+    s_last_activity_us = esp_timer_get_time();
     if (s_active) set_state(VOICE_CONNECTING);
     xQueueSend(s_ctl_q, &cmd, 0);
 }
+
+void voice_new_conversation(void)
+{
+    char id[SET_CONV_LEN + 1];
+    settings_new_conversation(id, sizeof(id));
+    text_clear();
+    /* the conversation ID is part of the connection URL: reconnect if connected or connecting */
+    if (s_active && s_want) voice_reconnect();
+}
+
+void voice_set_connected(bool on)
+{
+    if (on == s_want) return;
+    ESP_LOGI(TAG, "Connection switched %s", on ? "on" : "off");
+    voice_ptt_cancel();
+    s_want = on;
+    s_cfg_error = false;
+    s_last_activity_us = esp_timer_get_time();
+    set_note("%s", "");
+    if (s_active) set_state(on ? (net_is_up() ? VOICE_CONNECTING : VOICE_WAIT_WIFI) : VOICE_DISCONNECTED);
+    uint32_t cmd = CMD_WAKE;
+    xQueueSend(s_ctl_q, &cmd, 0);
+}
+
+bool voice_wants_connection(void) { return s_want; }
 
 void voice_set_volume(int percent)
 {
@@ -690,7 +877,11 @@ void voice_set_volume(int percent)
 void voice_ptt_press(void)
 {
     s_last_activity_us = esp_timer_get_time();
-    if (s_rec_task && s_state == VOICE_READY && s_ws_connected && !s_recording) {
+    if (s_active && !s_want) {               /* disconnected: a tap reconnects */
+        voice_set_connected(true);
+        return;
+    }
+    if (s_rec_task && !s_resending && s_state == VOICE_READY && s_ws_connected && !s_recording) {
         s_rec_cancel = false;
         s_recording = true;
         xTaskNotifyGive(s_rec_task);
@@ -711,6 +902,32 @@ void voice_ptt_cancel(void)
 }
 
 /* ------------------------------------------------------------ recording */
+
+/* Sends one WAV as one binary frame. True only if every byte went out: the library returns 0
+ * (not -1) when the link stalls and the write times out. */
+static bool send_wav(const uint8_t *wav, size_t total)
+{
+    int sent = -1;
+    int64_t t0 = esp_timer_get_time();
+    xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
+    if (s_ws) sent = esp_websocket_client_send_bin(s_ws, (const char *)wav, (int)total, pdMS_TO_TICKS(15000));
+    xSemaphoreGive(s_ws_mtx);
+    int64_t send_ms = (esp_timer_get_time() - t0) / 1000;
+    bool ok = (sent == (int)total);
+    if (ok) {
+        s_dg.last_tx_us = esp_timer_get_time();
+        s_dg.tx_frames++;
+        s_dg.tx_bytes += sent;
+    }
+#if VOICE_DIAG
+    ESP_LOGI(DTAG, "tx WAV %u bytes: result %d in %lld ms%s", (unsigned)total, sent, (long long)send_ms,
+             ok ? "" : " (FAILED)");
+    if (!ok) diag("after failed send");
+#else
+    (void)send_ms;
+#endif
+    return ok;
+}
 static void rec_task(void *arg)
 {
     const size_t io_bytes = READ_FRAMES * I2S_CHANNELS * sizeof(int16_t);
@@ -748,7 +965,7 @@ static void rec_task(void *arg)
         s_last_activity_us = esp_timer_get_time();
 
         uint32_t ms = (uint32_t)(n * 1000 / REC_RATE);
-        if (s_rec_cancel || !s_active) {   // the touch was a swipe, or the app closed
+        if (s_rec_cancel || !LIVE()) {     // the touch was a swipe, or the app closed / disconnected
             s_rec_cancel = false;
             ESP_LOGI(TAG, "Discarded %u ms of audio", (unsigned)ms);
             set_state(VOICE_READY);
@@ -774,16 +991,37 @@ static void rec_task(void *arg)
         s_last_rx_us = s_turn_start_us;
         set_state(VOICE_THINKING);
 
-        int sent = -1;
-        xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
-        if (s_ws) sent = esp_websocket_client_send_bin(s_ws, (const char *)wav, (int)total, pdMS_TO_TICKS(15000));
-        xSemaphoreGive(s_ws_mtx);
-        if (sent < 0) {
-            ESP_LOGE(TAG, "Send failed");
-            set_state(VOICE_READY);
-            set_note("Send failed - try again");
+        int conn_before = s_dg.connects;
+        bool ok = send_wav(wav, total);
+
+        if (!ok && LIVE()) {
+            /* The link broke mid-send (the library reconnects by itself). Wait for a NEW connection,
+             * not the stale flag of the broken one, then resend the same recording once. */
+            ESP_LOGW(TAG, "Send failed; waiting up to %d s for the reconnect to resend", RESEND_WAIT_MS / 1000);
+            s_resending = true;
+            set_note("Connection lost - resending...");
+            set_state(VOICE_THINKING);
+            int64_t deadline = esp_timer_get_time() + (int64_t)RESEND_WAIT_MS * 1000;
+            while (LIVE() && esp_timer_get_time() < deadline &&
+                   !(s_ws_connected && s_dg.connects > conn_before)) {
+                vTaskDelay(pdMS_TO_TICKS(200));
+            }
+            if (LIVE() && s_ws_connected && s_dg.connects > conn_before) {
+                ESP_LOGI(TAG, "Reconnected: resending the recording");
+                s_turn_start_us = esp_timer_get_time();
+                s_last_rx_us = s_turn_start_us;
+                ok = send_wav(wav, total);
+                if (ok) set_note("%s", "");
+            }
+            s_resending = false;
+        }
+
+        if (ok) {
+            ESP_LOGI(TAG, "Sent %u bytes (%u ms of audio)", (unsigned)total, (unsigned)ms);
         } else {
-            ESP_LOGI(TAG, "Sent %d bytes (%u ms of audio)", sent, (unsigned)ms);
+            ESP_LOGE(TAG, "Send failed");
+            set_state(s_ws_connected ? VOICE_READY : VOICE_CONNECTING);
+            set_note("Send failed - try again");
         }
     }
 }
@@ -859,7 +1097,7 @@ static void play_pcm16(const uint8_t *pcm, size_t frames, int channels, uint32_t
     #define SAMPLE_AT(i) ((i) == 0 ? s_rs.prev : mono_at(pcm, (i) - 1, channels, frame_bytes))
 
     while (s_rs.pos + 1.0 <= (double)frames) {
-        if (!s_active) return;                         /* app closed: stop talking */
+        if (!LIVE()) return;                           /* app closed or disconnected: stop talking */
         size_t i = (size_t)s_rs.pos;
         double f = s_rs.pos - (double)i;
         int32_t a = SAMPLE_AT(i);
@@ -905,7 +1143,7 @@ static void play_task(void *arg)
         play_item_t item;
         xQueueReceive(s_play_q, &item, portMAX_DELAY);
 
-        if (!s_active) {                     /* app closed: drop what's left of the reply */
+        if (!LIVE()) {                       /* app closed or disconnected: drop the rest of the reply */
             heap_caps_free(item.data);
             s_mp3_active = false;
             s_mp3_carry_len = 0;
@@ -957,7 +1195,7 @@ static void play_task(void *arg)
 
             size_t off = 0;
             int frames_decoded = 0;
-            while (off < in_len && s_active) {
+            while (off < in_len && LIVE()) {
                 if (!final_chunk && in_len - off < 4096) break;   // wait for the next message
                 mp3dec_frame_info_t info;
                 int samples = mp3dec_decode_frame(s_mp3, in + off, (int)(in_len - off), s_mp3_pcm, &info);
@@ -1021,6 +1259,12 @@ esp_err_t voice_init(void)
 {
     s_txt_mtx = xSemaphoreCreateMutex();
     s_ws_mtx = xSemaphoreCreateMutex();
+#if VOICE_DIAG_VERBOSE
+    esp_log_level_set("websocket_client", ESP_LOG_DEBUG);
+    esp_log_level_set("transport_ws", ESP_LOG_DEBUG);
+    esp_log_level_set("transport_base", ESP_LOG_DEBUG);
+    esp_log_level_set("esp-tls", ESP_LOG_DEBUG);
+#endif
     s_ctl_q = xQueueCreate(8, sizeof(uint32_t));
     s_play_q = xQueueCreate(16, sizeof(play_item_t));
 

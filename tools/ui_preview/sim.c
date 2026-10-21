@@ -193,5 +193,41 @@ int main(void)
     swipe(330, 250, 120, 250);
     g_net = NET_CONNECTING;
     shot("24_home_light_connecting");
+    g_net = NET_UP;
+
+    /* connection switch */
+    ui_theme_set_dark(true); ui_nav_refresh(); step(500);
+    tap_text("Voice chat");
+    swipe(233, 330, 233, 170);
+    {
+        lv_obj_t *l = find_text(lv_screen_active(), "Connection");
+        lv_obj_t *row = lv_obj_get_parent(lv_obj_get_parent(l));
+        lv_obj_t *sw = lv_obj_get_child(row, -1);
+        lv_area_t a; lv_obj_get_coords(sw, &a);
+        tap((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);
+    }
+    printf("want after switch tap: %d (should be 0)\n", voice_wants_connection());
+    shot("25_voice_settings_disconnected");
+    swipe(233, 180, 233, 340);
+    strcpy(g_note, "Disconnected after 3 min idle"); bump();
+    shot("26_voice_disconnected");
+    tap(233, 233);
+    g_note[0] = 0; bump();
+    printf("want after mic tap: %d (should be 1)\n", voice_wants_connection());
+    shot("27_voice_reconnected");
+
+    /* new conversation */
+    swipe(233, 330, 233, 170);
+    shot("28_voice_settings_buttons");
+    swipe(330, 250, 120, 250);
+    tap_text("Settings");
+    lv_obj_scroll_to_view_recursive(lv_obj_get_parent(lv_obj_get_parent(find_text(lv_screen_active(), "Conversation"))), LV_ANIM_OFF);
+    lv_obj_send_event(lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(find_text(lv_screen_active(), "Conversation")))), LV_EVENT_SCROLL, NULL);
+    shot("29_settings_conversation");
+    tap_text("New conversation");
+    shot("30_new_conversation_confirm");
+    tap_text("Start new");
+    step(300);
+    shot("31_after_new_conversation");
     return 0;
 }

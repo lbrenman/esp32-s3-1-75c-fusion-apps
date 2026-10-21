@@ -29,6 +29,10 @@ int         net_rssi(void);                  /* dBm, 0 when not connected */
 int         net_last_reason(void);           /* last disconnect reason (201 = SSID not found, 15/202 = password) */
 bool        net_time_valid(void);            /* clock has been set by NTP */
 
+/* Wi-Fi power saving (modem sleep). On by default to save battery; the voice chat turns it off
+ * while its WebSocket is open, because power saving roughly halves upload speed. */
+void        net_set_power_save(bool on);
+
 /* Wi-Fi scan in the background. Poll net_scan_result() until it returns true. */
 void net_scan_start(void);
 bool net_scan_result(const net_ap_t **aps, int *count);   /* true once finished; count may be 0 */

@@ -202,7 +202,13 @@ static void ui_update(bool force)
         lv_label_set_text(s_ui.reply, has_text ? note : "");
     }
     /* otherwise the note sits under the orb */
-    lv_label_set_text(s_ui.note, (!has_text && st != VOICE_LISTENING) ? note : "");
+    if (st == VOICE_DISCONNECTED && !has_text) {
+        char buf[140];
+        snprintf(buf, sizeof(buf), "%s%sTap to connect", note, note[0] ? "\n" : "");
+        lv_label_set_text(s_ui.note, buf);
+    } else {
+        lv_label_set_text(s_ui.note, (!has_text && st != VOICE_LISTENING) ? note : "");
+    }
     if (heard[0]) lv_obj_remove_flag(s_ui.heard, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(s_ui.heard, LV_OBJ_FLAG_HIDDEN);
 
@@ -214,11 +220,6 @@ static void ui_update(bool force)
 static void timer_cb(lv_timer_t *t)
 {
     ui_update(false);
-#if VOICE_AUTO_HOME_MS > 0
-    if (voice_state() == VOICE_READY && voice_idle_us() > (int64_t)VOICE_AUTO_HOME_MS * 1000 && !ui_nav_busy()) {
-        ui_nav_home(LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
-    }
-#endif
 }
 
 static void delete_cb(lv_event_t *e)
@@ -372,7 +373,8 @@ static lv_obj_t *voice_build(void *arg)
 
 /* ===================================================== voice settings (swipe up/down) */
 static lv_obj_t  *s_vs_scr;
-static ui_row_t   s_vs_url, s_vs_key, s_vs_status;
+static ui_row_t   s_vs_url, s_vs_key;
+static ui_toggle_row_t s_vs_conn;
 static lv_timer_t *s_vs_timer;
 
 static void vs_refresh(void)
@@ -387,10 +389,20 @@ static void vs_refresh(void)
     voice_state_t st = voice_state();
     char note[100];
     voice_text_get(NULL, 0, NULL, 0, note, sizeof(note));
-    const char *txt = voice_connected() ? "Connected" : (note[0] ? note : voice_state_text(st));
-    lv_label_set_text(s_vs_status.value, txt);
-    uint32_t c = voice_connected() ? UI_C_GREEN : (st == VOICE_ERROR ? UI_C_RED : UI_C_ORANGE);
-    lv_obj_set_style_bg_color(lv_obj_get_child(s_vs_status.row, 0), lv_color_hex(c), 0);
+    bool want = voice_wants_connection();
+    const char *txt;
+    uint32_t c;
+    if (!want)                  { txt = note[0] ? note : "Off"; c = UI_C_GRAY; }
+    else if (voice_connected()) { txt = "Connected"; c = UI_C_GREEN; }
+    else if (st == VOICE_ERROR) { txt = note[0] ? note : voice_state_text(st); c = UI_C_RED; }
+    else                        { txt = note[0] ? note : voice_state_text(st); c = UI_C_ORANGE; }
+    lv_label_set_text(s_vs_conn.value, txt);
+    lv_obj_set_style_bg_color(lv_obj_get_child(s_vs_conn.row, 0), lv_color_hex(c), 0);
+    /* follow the engine (an idle timeout switches it off) */
+    if (want != lv_obj_has_state(s_vs_conn.sw, LV_STATE_CHECKED)) {
+        if (want) lv_obj_add_state(s_vs_conn.sw, LV_STATE_CHECKED);
+        else lv_obj_remove_state(s_vs_conn.sw, LV_STATE_CHECKED);
+    }
 }
 
 static void vs_timer_cb(lv_timer_t *t) { vs_refresh(); }
@@ -453,6 +465,12 @@ static void key_cb(lv_event_t *e)
     ui_editor_open(&ed, false);
 }
 
+static void conn_cb(lv_event_t *e)
+{
+    voice_set_connected(lv_obj_has_state(lv_event_get_target_obj(e), LV_STATE_CHECKED));
+    vs_refresh();
+}
+
 static void reset_server_cb(lv_event_t *e)
 {
     if (ui_nav_busy()) return;
@@ -463,6 +481,19 @@ static void reset_server_cb(lv_event_t *e)
     voice_reconnect();
     vs_refresh();
     ui_toast("URL reset to secrets.h");
+}
+
+static void do_new_conversation(void *user)
+{
+    voice_new_conversation();
+    ui_toast("New conversation started");
+}
+
+static void new_conv_cb(lv_event_t *e)
+{
+    if (ui_nav_busy()) return;
+    ui_confirm("New conversation?", "The voice server starts fresh and forgets what you talked about.",
+               "Start new", false, do_new_conversation, NULL);
 }
 
 static void done_cb(lv_event_t *e)
@@ -499,7 +530,8 @@ static lv_obj_t *voice_settings_build(void *arg)
     lv_label_set_long_mode(s_vs_url.value, LV_LABEL_LONG_MODE_DOTS);   /* up to 2 lines, then "..." */
     lv_obj_set_height(s_vs_url.value, 2 * lv_font_get_line_height(&lv_font_montserrat_14));
     s_vs_key = ui_row(list, ICON_KEY, UI_C_ORANGE, "API key", "", key_cb, NULL);
-    s_vs_status = ui_row(list, ICON_PLUG, UI_C_ORANGE, "Connection", "", NULL, NULL);
+    s_vs_conn = ui_row_toggle(list, ICON_PLUG, UI_C_ORANGE, "Connection", "", voice_wants_connection(),
+                              conn_cb, NULL);
 
     /* small actions under the rows */
     lv_obj_t *act = lv_obj_create(list);
@@ -511,6 +543,8 @@ static lv_obj_t *voice_settings_build(void *arg)
     lv_obj_set_style_pad_top(act, 6, 0);
     lv_obj_t *rst = ui_round_button(act, ICON_RESET, &ui_icons_20, 52, ui_pal.card, ui_pal.text_dim);
     lv_obj_add_event_cb(rst, reset_server_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *nc = ui_round_button(act, ICON_COMMENT, &ui_icons_20, 52, ui_pal.card, ui_pal.text_dim);
+    lv_obj_add_event_cb(nc, new_conv_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *done = ui_round_button(act, ICON_DOWN, &ui_icons_20, 52, ui_pal.accent, lv_color_white());
     lv_obj_add_event_cb(done, done_cb, LV_EVENT_CLICKED, NULL);
 

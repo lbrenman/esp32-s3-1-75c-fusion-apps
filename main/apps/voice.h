@@ -17,11 +17,15 @@ typedef enum {
     VOICE_THINKING,
     VOICE_SPEAKING,
     VOICE_ERROR,        /* e.g. no server URL set; details in the note text */
+    VOICE_DISCONNECTED, /* app open, connection switched off (or closed after idle) */
 } voice_state_t;
 
 esp_err_t     voice_init(void);              /* once at boot: codec + tasks */
 void          voice_set_active(bool active); /* app opened / closed: connect / disconnect */
-void          voice_reconnect(void);         /* server URL or API key changed */
+void          voice_reconnect(void);         /* server URL or API key changed (also switches the connection on) */
+void          voice_set_connected(bool on);
+void          voice_new_conversation(void);  /* new saved conversation ID; reconnects if connected */  /* the Connection switch; on each time the app opens */
+bool          voice_wants_connection(void);
 void          voice_set_volume(int percent);
 
 /* push-to-talk (call from the LVGL task) */

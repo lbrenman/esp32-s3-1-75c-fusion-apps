@@ -45,6 +45,14 @@ ui_row_t  ui_row(lv_obj_t *list, const char *icon, uint32_t icon_color, const ch
 /* Row with a switch on the right. on_change gets LV_EVENT_VALUE_CHANGED from the switch. */
 lv_obj_t *ui_row_switch(lv_obj_t *list, const char *icon, uint32_t icon_color, const char *title,
                         bool on, lv_event_cb_t on_change, void *user);
+/* Row with a title, a status line underneath and a switch on the right. */
+typedef struct {
+    lv_obj_t *row;
+    lv_obj_t *value;
+    lv_obj_t *sw;
+} ui_toggle_row_t;
+ui_toggle_row_t ui_row_toggle(lv_obj_t *list, const char *icon, uint32_t icon_color, const char *title,
+                              const char *value, bool on, lv_event_cb_t on_change, void *user);
 /* Row with a slider underneath. cb gets VALUE_CHANGED (while dragging) and RELEASED. */
 lv_obj_t *ui_row_slider(lv_obj_t *list, const char *icon, uint32_t icon_color, const char *title,
                         int min, int max, int value, lv_event_cb_t cb, void *user);

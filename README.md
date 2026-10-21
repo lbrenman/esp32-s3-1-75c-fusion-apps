@@ -21,14 +21,15 @@ the device.*
 | --- | --- |
 | **Home** | Date and time (from NTP), app icons, Wi-Fi status, day/night button |
 | **Voice chat** | Hold to talk, release to send. Shows what the server heard and its reply, plays the reply audio |
-| **Voice server** (swipe up/down in Voice chat) | See and change the server URL and API key, connection status, reset URL to `secrets.h` |
-| **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, restart, reset |
+| **Voice server** (swipe up/down in Voice chat) | See and change the server URL and API key, connect/disconnect switch with status, reset URL to `secrets.h` |
+| **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new), restart, reset |
 
 ### Gestures
 
 | Where | Gesture | Result |
 | --- | --- | --- |
 | Voice chat | Touch and hold | Record while held (up to 10 s); release to send |
+| Voice chat (disconnected) | Tap | Connect again |
 | Voice chat | Swipe up / down | Voice server settings |
 | Voice chat, Voice server | Swipe left / right | Back to Home |
 | Voice server | Swipe up / down, or the ⌄ button | Back to Voice chat |
@@ -37,8 +38,30 @@ the device.*
 Recording starts the moment your finger lands, so your first word isn't cut off. If the finger
 then moves at least 60 px within 0.8 s, the touch was a swipe and the recording is thrown away.
 
-The WebSocket is opened when Voice chat opens and closed when you go back to Home. After 3 minutes
-idle, Voice chat returns to Home by itself (`VOICE_AUTO_HOME_MS`).
+### The server connection
+
+| When | What happens |
+| --- | --- |
+| Voice chat opens | Connects with the saved `conversationId`; the Connection switch starts **on** |
+| While connected | A ping every 20 s keeps the link alive; if it drops, the client retries every 5 s. Wi-Fi power saving is off for faster uploads |
+| Reconnecting (switch, tap, after idle or a drop), Home, reboot | Same `conversationId` |
+| **New conversation** (Settings > Voice chat, or the conversation button on the Voice server screen) | Saves a new `conversationId` and reconnects with it |
+| 3 min without a turn or a touch (`VOICE_IDLE_DISCONNECT_MS`) | Disconnects, on any screen; the mic turns gray: "Tap to connect" |
+| Connection switch on the Voice server screen | Off = disconnect now, on = connect again |
+| Tap the gray mic | Reconnects |
+| Back to Home | Disconnects; Wi-Fi power saving goes back on |
+
+Turning the connection off in the middle of a reply stops the playback.
+
+If the link stalls while a recording is being sent (the write times out after 15 s), the WebSocket
+library drops the connection and reconnects. The app shows "Connection lost - resending...", waits
+up to 20 s (`RESEND_WAIT_MS` in `voice_core.c`) for the new connection and sends the same recording
+once more. If that fails too, it shows "Send failed - try again".
+
+Wi-Fi joins the **strongest** access point with your network name (it scans all channels first),
+which matters on mesh networks and with extenders. The log shows which one:
+`net: Wi-Fi connected, IP ..., AP xx:xx:..., channel N, -NN dBm`. The choice is made when Wi-Fi
+connects; the board doesn't switch access points while it stays connected.
 
 ### Voice chat ring colors
 
@@ -50,6 +73,7 @@ idle, Voice chat returns to Home by itself (`VOICE_AUTO_HOME_MS`).
 | Blue | Thinking... | Waiting for the reply (three bouncing dots) |
 | Purple | Speaking... | Playing the reply |
 | Red | Not connected | No usable server URL; the note under the mic says what to fix |
+| Gray | Disconnected | Switched off, or idle timeout; tap to connect |
 
 ---
 
@@ -217,7 +241,7 @@ Change the fake values in `stubs.c` or the click-through script in `sim.c` to pr
 | `app_config.h` | `APP_CLOCK_24H` | 0 (12-hour) |
 | `app_config.h` | `UI_ANIM_MS` (screen slide time) | 220 ms; 0 = instant |
 | `app_config.h` | `UI_SWIPE_MIN_PX`, `UI_SWIPE_MAX_MS` | 60 px, 800 ms |
-| `app_config.h` | `VOICE_AUTO_HOME_MS` | 3 min; 0 = never |
+| `app_config.h` | `VOICE_IDLE_DISCONNECT_MS` | 3 min; 0 = never |
 | `app_config.h` | `DEFAULT_DARK_MODE`, `DEFAULT_BRIGHTNESS`, `DEFAULT_VOLUME` | dark, 80 %, 75 % (first boot) |
 | `apps/voice_core.c` | `REC_MAX_SECONDS`, `TURN_TIMEOUT_US`, `RX_MAX_BYTES` | 10 s, 45 s, 3 MB |
 | `ui/ui_theme.c` | palette colors | |
@@ -227,7 +251,56 @@ Change the fake values in `stubs.c` or the click-through script in `sim.c` to pr
 Unchanged from voice_chat: connect to `<server URL>?x-api-key=<key>&conversationId=<uuid>`, send
 one binary frame per turn (WAV, 16 kHz mono 16-bit), receive JSON text frames
 (`TRANSCRIBED_REQUEST`, `RESPONSE`, `ERROR`) and binary reply audio (MP3, WAV or raw PCM).
-A new `conversationId` is made each time Voice chat opens.
+The `conversationId` is made on first start and saved in flash with the other settings. Every turn
+and every reconnect uses it, across reboots, until you choose **New conversation** (Settings > Voice
+chat, or the conversation button on the Voice server screen). Reset settings also starts a new one.
+Whether the server remembers earlier turns after a reconnect depends on the server keying its
+history on `conversationId` rather than on the WebSocket connection.
+
+## Diagnosing connection drops
+
+With `VOICE_DIAG 1` in `app_config.h` (the default), the voice engine logs connection health under
+the `vdiag` tag. Nothing secret is logged: the URL's query string (API key) never appears.
+
+| Line | When |
+| --- | --- |
+| `connect attempt #N to <host> (...)` | Each new connection, with the ping and timeout settings |
+| `CONNECTED #N (attempt #M) in X ms` | The link is up |
+| `heartbeat \| state=... up=... last rx ... pong ... \| wifi ... dBm \| heap ...` | Every 30 s while Voice chat is open |
+| `tx WAV N bytes: result R in X ms` | Each recording sent |
+| `rx text/binary message, N bytes` | Each message from the server |
+| `ERROR type=... handshake_status=... tls_err=... sock_errno=...` | Any WebSocket error, decoded |
+| `CLOSE frame from server: code=... reason="..."` | The server closed the connection |
+| `DISCONNECTED (drop #N) \| ...` | The link dropped: how long it was up, and when anything last arrived |
+| `closing (app/switch/idle)` | A disconnect the app asked for (Home, switch, idle timeout) |
+
+How to read a drop:
+- `pong` age near 120 s before the drop, or `ERROR type=2 (pong timeout)`: the server or something
+  in between stopped answering pings.
+- `ERROR type=1` with `sock_errno=104` (connection reset) or `113`/`118` (host unreachable):
+  the network path broke; check `wifi` and the `net:` Wi-Fi lines around it.
+- `CLOSE frame` with a code: the server ended it on purpose (for example an idle timeout on the server side).
+- Drops at the same `up=` time each time point to a timeout on the server or a proxy.
+
+### Capturing a session to a file
+
+`script` keeps the monitor interactive and saves everything it prints:
+
+```bash
+cd ~/esp/projects/FusionApps/esp32-s3-1-75c-fusion-apps
+script -q ~/Desktop/voice_session.log idf.py -p /dev/cu.usbmodem1101 monitor
+# use the app until the problem happens, then exit with Ctrl-]
+```
+
+### Library debug logs (optional, very chatty)
+
+To also see the WebSocket and TLS libraries' own debug output (every ping and pong), set
+`VOICE_DIAG_VERBOSE 1` in `app_config.h`, allow debug-level logs in the build, and rebuild:
+
+```bash
+echo "CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y" >> sdkconfig.defaults
+rm sdkconfig && idf.py -p /dev/cu.usbmodem1101 build flash monitor
+```
 
 ## Troubleshooting
 
@@ -248,4 +321,5 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem101 monitor`). Tags: `app`
 | Build error about a `lv_font_montserrat_*` font | Fonts not enabled | `rm sdkconfig && idf.py set-target esp32s3` (rereads `sdkconfig.defaults`) |
 | `Draw bitmap failed: ESP_ERR_NO_MEM` | Too little internal RAM for display DMA | Check the `SPIRAM_MALLOC_*` lines are in `sdkconfig.defaults`, then `rm sdkconfig` and set-target again |
 | Recorded 0 ms / no transcript | Mic not capturing | Confirm the board is the 1.75C |
+| `tx WAV ... result 0 ... (FAILED)` after ~15 s, then a reconnect | Wi-Fi link stalled (often a weak signal: check the dBm in the `net:` and `vdiag` lines) | The app resends automatically; move closer to the access point if it repeats |
 | Swipes start recordings, or holds count as swipes | Swipe thresholds | Adjust `UI_SWIPE_MIN_PX` / `UI_SWIPE_MAX_MS` |

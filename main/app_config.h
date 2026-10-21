@@ -17,8 +17,19 @@
 #define UI_SWIPE_MIN_PX   60         /* travel that counts as a swipe */
 #define UI_SWIPE_MAX_MS   800        /* a swipe must happen this soon after touching */
 
-/* Voice chat: go back to the home screen after this long idle; 0 = never */
-#define VOICE_AUTO_HOME_MS (3 * 60 * 1000)
+/* Voice chat: close the server connection after this long without a turn or a touch; 0 = never.
+ * The connection also closes when you go back to Home. Tap the mic (or the Connection switch on
+ * the Voice server screen) to reconnect. */
+#define VOICE_IDLE_DISCONNECT_MS (3 * 60 * 1000)
+
+/* Connection diagnostics in the serial log (tag "vdiag"): every connect/disconnect with timings,
+ * decoded error details, close codes, send times, and a health line every VOICE_DIAG_HEARTBEAT_S
+ * seconds while Voice chat is open. 0 = off. */
+#define VOICE_DIAG               1
+#define VOICE_DIAG_HEARTBEAT_S   30
+/* Also turn on the WebSocket/TLS libraries' own debug logs (very chatty: every ping/pong).
+ * Needs CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y: see README, "Diagnosing connection drops". */
+#define VOICE_DIAG_VERBOSE       0
 
 /* Defaults used until the user changes them in Settings */
 #define DEFAULT_DARK_MODE   1

@@ -10,6 +10,11 @@
 #define APP_NTP_SERVER    "pool.ntp.org"
 #define APP_CLOCK_24H     0          /* 1 = 16:40, 0 = 4:40 PM */
 
+/* Display: LVGL draws the screen in bands of this many lines. Each band needs a DMA buffer of
+ * 466 x lines x 2 bytes in internal RAM while it's sent (two at once with double buffering).
+ * The BSP's default is 50 lines (45 KB each), too big to find next to the wake word and TLS. */
+#define APP_LVGL_BUF_LINES 12        /* about 10 KB per band; must be even */
+
 /* Screen transitions */
 #define UI_ANIM_MS        220        /* slide time between screens; 0 = instant */
 
@@ -19,8 +24,28 @@
 
 /* Voice chat: close the server connection after this long without a turn or a touch; 0 = never.
  * The connection also closes when you go back to Home. Tap the mic (or the Connection switch on
- * the Voice server screen) to reconnect. */
+ * the Voice server screen) to reconnect. Not used while the wake word is on: the connection then
+ * stays up as long as the Voice chat screen is open, so the device is ready when you say the word. */
 #define VOICE_IDLE_DISCONNECT_MS (3 * 60 * 1000)
+
+/* Voice chat wake word (ESP-SR WakeNet). While the Voice chat screen is open and the wake word is
+ * on (Settings > Voice chat), say the word, then your request; the turn ends when you stop talking.
+ * Hold to talk keeps working, and a quick tap listens hands-free.
+ * The model is chosen in sdkconfig.defaults (CONFIG_SR_WN_WN9_JARVIS_TTS) and `idf.py flash` writes
+ * it to the "model" partition. To use another built-in word, change the CONFIG_SR_WN_* line and
+ * these two names, then `rm sdkconfig` and rebuild. */
+#define WAKE_WORD_LABEL      "Jarvis"      /* shown on screen */
+#define WAKE_WORD_MODEL      "jarvis"      /* part of the model's name: wn9_jarvis_tts */
+#define DEFAULT_WAKE_WORD    1             /* wake word on at first boot */
+#define WAKE_CHIME           1             /* short tone when the wake word is heard; 0 = silent */
+#define WAKE_END_SILENCE_MS  800           /* this much silence after you speak ends the turn */
+#define WAKE_NO_SPEECH_MS    5000          /* give up if you don't start talking within this */
+#define WAKE_HOLD_TAP_MS     350           /* a touch shorter than this listens hands-free */
+#define WAKE_DEBUG           1             /* log the voice level 4x a second while listening */
+/* The wake word needs some internal RAM, which the display needs too. If less than this is left
+ * after it starts, it turns itself off and Voice chat goes back to hold to talk (see the log). */
+#define WAKE_MIN_FREE_INTERNAL_KB  20
+#define WAKE_MIN_DMA_BLOCK_KB      12
 
 /* Connection diagnostics in the serial log (tag "vdiag"): every connect/disconnect with timings,
  * decoded error details, close codes, send times, and a health line every VOICE_DIAG_HEARTBEAT_S

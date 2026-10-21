@@ -25,6 +25,7 @@ typedef struct {
     char    mcp_url[SET_URL_MAX + 1];     /* Stocks: https://host:port/FusionStockWatchListMCP */
     char    mcp_api_key[SET_KEY_MAX + 1];
     bool    stocks_auto;                  /* Stocks: refresh quotes automatically */
+    bool    wake_word;                    /* Voice chat: listen for the wake word (else hold to talk only) */
 } app_settings_t;
 
 /* Initializes NVS and loads the settings. Call once, first thing in app_main. */

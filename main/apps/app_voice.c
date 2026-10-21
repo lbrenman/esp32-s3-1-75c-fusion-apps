@@ -1,5 +1,7 @@
 /* Voice chat app: the push-to-talk screen and its server settings screen.
  *
+ *   "Jarvis" ...       -> talk hands-free, if the wake word is on (Settings > Voice chat)
+ *   quick tap          -> talk hands-free, if the wake word is on
  *   touch and hold     -> talk (release to send)
  *   swipe up / down    -> voice settings (server URL, API key)
  *   swipe left / right -> back to Home
@@ -37,6 +39,7 @@ typedef struct {
     lv_timer_t *timer;
     voice_state_t last_state;
     uint32_t last_ver;
+    bool last_wake;             /* the wake word engine was listening */
     int last_mode;              /* what the center shows: 0 orb, 1 text */
     bool dots_on, halo_on;
 } voice_ui_t;
@@ -161,9 +164,11 @@ static void ui_update(bool force)
 {
     voice_state_t st = voice_state();
     uint32_t ver = voice_text_version();
-    if (!force && st == s_ui.last_state && ver == s_ui.last_ver) return;
+    bool wake = voice_wake_listening();
+    if (!force && st == s_ui.last_state && ver == s_ui.last_ver && wake == s_ui.last_wake) return;
     s_ui.last_state = st;
     s_ui.last_ver = ver;
+    s_ui.last_wake = wake;
 
     static char heard[220], reply[340], note[100];
     voice_text_get(heard, sizeof(heard), reply, sizeof(reply), note, sizeof(note));
@@ -202,10 +207,15 @@ static void ui_update(bool force)
         lv_label_set_text(s_ui.reply, has_text ? note : "");
     }
     /* otherwise the note sits under the orb */
+    lv_obj_set_style_text_color(s_ui.note, ui_pal.warn, 0);
     if (st == VOICE_DISCONNECTED && !has_text) {
         char buf[140];
         snprintf(buf, sizeof(buf), "%s%sTap to connect", note, note[0] ? "\n" : "");
         lv_label_set_text(s_ui.note, buf);
+    } else if (st == VOICE_READY && wake && !has_text && !note[0]) {
+        /* the status line says 'Say "Jarvis"'; touch still works */
+        lv_obj_set_style_text_color(s_ui.note, ui_pal.text_dim, 0);
+        lv_label_set_text(s_ui.note, "or tap to talk");
     } else {
         lv_label_set_text(s_ui.note, (!has_text && st != VOICE_LISTENING) ? note : "");
     }
@@ -225,6 +235,7 @@ static void timer_cb(lv_timer_t *t)
 static void delete_cb(lv_event_t *e)
 {
     if (lv_event_get_target_obj(e) != s_ui.scr) return;
+    voice_set_foreground(false);             /* stop listening for the wake word */
     if (s_ui.timer) lv_timer_delete(s_ui.timer);
     for (int i = 0; i < DOT_COUNT; i++) lv_anim_delete(s_ui.dot[i], dot_anim_cb);
     lv_anim_delete(s_ui.halo, halo_anim_cb);
@@ -369,6 +380,7 @@ static lv_obj_t *voice_build(void *arg)
     ui_update(true);
     s_ui.timer = lv_timer_create(timer_cb, 40, NULL);
     lv_obj_add_event_cb(scr, delete_cb, LV_EVENT_DELETE, NULL);
+    voice_set_foreground(true);              /* listen for the wake word while this screen shows */
     return scr;
 }
 

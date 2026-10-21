@@ -1,7 +1,8 @@
 # esp32-s3-1-75c-fusion-apps — App launcher for the ESP32-S3-Touch-AMOLED-1.75C
 
 A small "watch OS" for the Waveshare **ESP32-S3-Touch-AMOLED-1.75C**: a home screen with a clock and
-app icons, a **Voice chat** app (push-to-talk client for the Amplify Fusion WebSocket voice server),
+app icons, a **Voice chat** app (client for the Amplify Fusion WebSocket voice server: say "Jarvis" or
+hold to talk),
 a **Stocks** app (watchlist client for the FusionStockWatchListMCP server, an Amplify Fusion MCP
 server) and a **Settings** app. Day and night themes, Font Awesome icons, slide transitions.
 
@@ -18,6 +19,11 @@ the device.*
 > headers, but it hasn't been built with `idf.py` or talked to the real server yet.
 > Expect a small fix or two on the first build.
 
+> **The wake word is new and untested on the board.** The engine code is syntax-checked against
+> the ESP-IDF 5.5.2 and ESP-SR 2.6 headers and the screens are checked in `tools/ui_preview`, but it
+> hasn't been built with `idf.py` or heard anyone say "Jarvis" yet. Watch the `voice` lines in the
+> log on the first run, especially the internal RAM numbers when Voice chat opens.
+
 ---
 
 ## What's on the device
@@ -25,18 +31,20 @@ the device.*
 | Screen | What it does |
 | --- | --- |
 | **Home** | Battery level and charging state, date and time (from NTP), app icons, Wi-Fi status, day/night button |
-| **Voice chat** | Hold to talk, release to send. Shows what the server heard and its reply, plays the reply audio |
+| **Voice chat** | Say "Jarvis" and your request (wake word), or hold to talk and release to send. Shows what the server heard and its reply, plays the reply audio |
 | **Voice server** (swipe up/down in Voice chat) | See and change the server URL and API key, connect/disconnect switch with status, reset URL to `secrets.h` |
 | **Stocks** | Your watchlist: symbol, company, price, change and % change, colored green or red. Refreshes every minute while open; the ↻ / ❚❚ button pauses and resumes auto refresh |
 | **Quote** (tap a row in Stocks) | A detailed quote from `GetStockQuote`: price, change, open, previous close and the day's range (low–high with today's price marked). Refresh and remove buttons |
 | **Pick symbols** (+ or swipe left in Stocks) | Tabs of preset symbols (**QQQ 1**, **QQQ 2**, **Blue Chip**) and **Other** (watchlist symbols not on a tab, e.g. added from Claude). Tap to add (green) or remove (gray) |
 | **Stock server** (gear in Stocks) | See and change the MCP server URL and API key, connection status, refresh now, reset URL to `secrets.h` |
-| **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new), battery (%, state, voltage), version and free memory, restart, reset |
+| **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new) and wake word on/off, battery (%, state, voltage), version and free memory, restart, reset |
 
 ### Gestures
 
 | Where | Gesture | Result |
 | --- | --- | --- |
+| Voice chat | Say "Jarvis", then your request | Records until you stop talking, then sends (wake word on) |
+| Voice chat | Quick tap | Same as saying "Jarvis" (wake word on) |
 | Voice chat | Touch and hold | Record while held (up to 10 s); release to send |
 | Voice chat (disconnected) | Tap | Connect again |
 | Voice chat | Swipe up / down | Voice server settings |
@@ -54,6 +62,40 @@ the device.*
 Recording starts the moment your finger lands, so your first word isn't cut off. If the finger
 then moves at least 60 px within 0.8 s, the touch was a swipe and the recording is thrown away.
 
+### The wake word
+
+With **Settings > Voice chat > Wake word** on (the default), the Voice chat screen listens for
+"Jarvis" using Espressif's ESP-SR (WakeNet for the word, voice activity detection for the end of
+your request). Everything runs on the board; nothing is sent until you've said the word.
+
+| What you do | What happens |
+| --- | --- |
+| Open Voice chat | The status says **Say "Jarvis"**, with "or tap to talk" under the mic |
+| Say "Jarvis" | A short two-note chime, the ring turns red: **Listening...** |
+| Keep talking ("Jarvis, what's the weather"), or pause and then talk | Both work. The turn ends after 0.8 s of silence (`WAKE_END_SILENCE_MS`) or 10 s |
+| Say nothing for 5 s (`WAKE_NO_SPEECH_MS`) | "Didn't catch that"; back to waiting for the word |
+| Quick tap (under 0.35 s) | Listens the same way, without the word |
+| Touch and hold | Hold to talk, as before |
+
+- It only listens while the **Voice chat screen** itself is showing, with the connection on. On
+  Home, other apps, the Voice server screen, or with the connection switched off, the microphone
+  is off.
+- It starts listening once the server connection is up (the green ring), not during the screen's
+  slide-in and TLS handshake, which need internal RAM too.
+- Detection is off while a reply is thinking or playing, so the speaker can't wake it.
+- While the wake word is on, the 3-minute idle disconnect doesn't apply: the connection stays up
+  as long as Voice chat is open, so it's ready when you say the word. Back to Home disconnects.
+- The audio sent to the server is the same as with hold to talk (both mics mixed, 16 kHz mono WAV).
+- "Talking" means ESP-SR's voice activity detection says speech, **or** the sound is 12 dB above
+  the room's noise level (learned while it waits for the word). Less than 0.4 s of voice (the tail
+  of "Jarvis", a click) doesn't count. With `WAKE_DEBUG 1` the log shows
+  `voice: listen: vad=1 level=-38 dB (voice above -52) -> voice` four times a second while
+  listening, which is how to tune `WAKE_LEVEL_*` in `voice_core.c` if it ends too early or late.
+- It needs about 20-30 KB of internal RAM. If less than `WAKE_MIN_FREE_INTERNAL_KB` would be left
+  for the display, it turns itself off for this visit ("Wake word off: low memory", Settings shows
+  "Paused: low memory") and hold to talk keeps working. The log says how much it took.
+- Another built-in word ("Computer", "Hi ESP", "Alexa"...): see "Settings you might change".
+
 ### The server connection
 
 | When | What happens |
@@ -62,7 +104,7 @@ then moves at least 60 px within 0.8 s, the touch was a swipe and the recording 
 | While connected | A ping every 20 s keeps the link alive; if it drops, the client retries every 5 s. Wi-Fi power saving is off for faster uploads |
 | Reconnecting (switch, tap, after idle or a drop), Home, reboot | Same `conversationId` |
 | **New conversation** (Settings > Voice chat, or the conversation button on the Voice server screen) | Saves a new `conversationId` and reconnects with it |
-| 3 min without a turn or a touch (`VOICE_IDLE_DISCONNECT_MS`) | Disconnects, on any screen; the mic turns gray: "Tap to connect" |
+| 3 min without a turn or a touch (`VOICE_IDLE_DISCONNECT_MS`), wake word off | Disconnects, on any screen; the mic turns gray: "Tap to connect" |
 | Connection switch on the Voice server screen | Off = disconnect now, on = connect again |
 | Tap the gray mic | Reconnects |
 | Back to Home | Disconnects; Wi-Fi power saving goes back on |
@@ -108,6 +150,22 @@ the chip's own fuel gauge; it can take a few charge cycles to settle after a new
 
 The boot log has the same numbers plus the largest free DMA block:
 `app: Free memory: internal NN KB (largest DMA block NN KB), PSRAM NNNN KB`.
+
+Adding the wake word (ESP-SR) cost about 12 KB of internal RAM at boot (free dropped from about
+50 KB to 38 KB), and opening Voice chat with a TLS connection then left too little for the display
+(`Draw bitmap failed`). To win it back, `sdkconfig.defaults` moves code out of internal RAM (on
+the S3, code in IRAM and the heap share the same SRAM): Wi-Fi's IRAM speed-ups are off
+(`CONFIG_ESP_WIFI_IRAM_OPT`, `CONFIG_ESP_WIFI_RX_IRAM_OPT`), FreeRTOS and ring buffer functions run
+from flash, and the voice engine's task stacks are in PSRAM. These settings only apply after
+`rm sdkconfig && idf.py set-target esp32s3`. The `vdiag: on connect ... heap int NN KB (dma blk NN KB)`
+line shows what's left once Voice chat is connected.
+
+The display needs one more thing: LVGL draws the screen in bands, and while a band is sent the SPI
+driver borrows an internal DMA buffer the size of the band (the bands themselves are in PSRAM).
+The BSP's bands were 50 lines (45 KB), so once free internal RAM was split up, every other band
+failed and the screen showed stripes. `main/display_start.c` starts the display like
+`bsp_display_start()` but with `APP_LVGL_BUF_LINES` (12) lines per band, about 10 KB each. The boot
+log shows `display: Display started: 12-line draw bands (10 KB each)`.
 
 ### The Stocks app
 
@@ -169,8 +227,8 @@ RPC error or a tool error) is not retried.
 | Ring | Status | Meaning |
 | --- | --- | --- |
 | Amber | Waiting for Wi-Fi... / Connecting... | Connecting to Wi-Fi or the server |
-| **Green** | **Hold to talk** | Ready |
-| Red | Listening... | Recording (the mic orb pulses) |
+| **Green** | **Say "Jarvis"** / **Hold to talk** | Ready (wake word on / off) |
+| Red | Listening... | Recording (the mic orb pulses); after the wake word it stops when you do |
 | Blue | Thinking... | Waiting for the reply (three bouncing dots) |
 | Purple | Speaking... | Playing the reply |
 | Red | Not connected | No usable server URL; the note under the mic says what to fix |
@@ -205,7 +263,8 @@ button. Values already saved on the device win over `secrets.h` until **Settings
 
 ```
 esp32-s3-1-75c-fusion-apps/
-├── CMakeLists.txt, partitions.csv, sdkconfig.defaults   Waveshare 1.75C base (+ this project's settings)
+├── CMakeLists.txt, partitions.csv, sdkconfig.defaults   Waveshare 1.75C base (+ this project's settings;
+│                                  partitions.csv has a 1 MB "model" partition for the wake word)
 ├── sdkconfig.fusion_apps          just this project's settings, for reference
 ├── components/bsp_extra/          Waveshare's audio helper (codec, I2S, speaker amp)
 ├── main/
@@ -216,6 +275,7 @@ esp32-s3-1-75c-fusion-apps/
 │   ├── mcp_client.c/.h            small MCP client: Streamable HTTP, sessions, SSE replies
 │   ├── text_ascii.c/.h            turns ’ “ ” – é ... into ASCII the built-in fonts can draw
 │   ├── power.c/.h                 battery level and charging from the AXP2101 power chip
+│   ├── display_start.c/.h         starts display + touch + LVGL like the BSP, with smaller draw bands
 │   ├── secrets.h.example          copy to secrets.h (gitignored)
 │   ├── minimp3.h, minimp3_impl.c  MP3 decoder (CC0)
 │   ├── ui/
@@ -228,7 +288,7 @@ esp32-s3-1-75c-fusion-apps/
 │       ├── app_home.c             Home screen
 │       ├── app_settings.c         Settings app (+ Wi-Fi scan screen)
 │       ├── app_voice.c            Voice chat screen + Voice server screen
-│       ├── voice_core.c, voice.h  recording, WebSocket, playback (no LVGL in here)
+│       ├── voice_core.c, voice.h  recording, wake word, WebSocket, playback (no LVGL in here)
 │       ├── app_stocks.c           Stocks: Watchlist, Quote, Pick symbols and Stock server screens
 │       ├── stocks_core.c, stocks.h   the Stocks engine task: tool calls, queue, refresh timer (no LVGL)
 │       └── stocks_parse.c/.h      parses the watchlist server's replies (pure C, host-tested)
@@ -274,7 +334,7 @@ idf.py set-target esp32s3
 idf.py -p /dev/cu.usbmodem101 build flash monitor
 ```
 
-The first build downloads the BSP, LVGL and the WebSocket client and fetches `main/server_ca.pem`
+The first build downloads the BSP, LVGL, the WebSocket client and ESP-SR (the wake word) and fetches `main/server_ca.pem`
 from `WS_HOST:WS_PORT`, so it takes a few minutes.
 
 Optional: put it in git and on GitHub (`secrets.h` and `server_ca.pem` are gitignored):
@@ -376,7 +436,11 @@ make                      # first run clones cJSON; prints "N checks, 0 failed"
 | `app_config.h` | `APP_CLOCK_24H` | 0 (12-hour) |
 | `app_config.h` | `UI_ANIM_MS` (screen slide time) | 220 ms; 0 = instant |
 | `app_config.h` | `UI_SWIPE_MIN_PX`, `UI_SWIPE_MAX_MS` | 60 px, 800 ms |
-| `app_config.h` | `VOICE_IDLE_DISCONNECT_MS` | 3 min; 0 = never |
+| `app_config.h` | `VOICE_IDLE_DISCONNECT_MS` | 3 min; 0 = never (not used while the wake word is on) |
+| `app_config.h` | `DEFAULT_WAKE_WORD`, `WAKE_CHIME` | on (first boot), chime on |
+| `app_config.h` | `WAKE_END_SILENCE_MS`, `WAKE_NO_SPEECH_MS`, `WAKE_HOLD_TAP_MS` | 800 ms, 5 s, 350 ms |
+| `app_config.h` | `WAKE_MIN_FREE_INTERNAL_KB`, `WAKE_MIN_DMA_BLOCK_KB` | 20 KB, 12 KB |
+| `app_config.h` + `sdkconfig.defaults` | The wake word: `WAKE_WORD_LABEL`, `WAKE_WORD_MODEL` and `CONFIG_SR_WN_WN9_JARVIS_TTS=y` | Jarvis. For "Computer": `"Computer"`, `"computer"` and `CONFIG_SR_WN_WN9_COMPUTER_TTS=y` (remove the Jarvis line), then `rm sdkconfig && idf.py set-target esp32s3 && idf.py build flash` |
 | `app_config.h` | `DEFAULT_DARK_MODE`, `DEFAULT_BRIGHTNESS`, `DEFAULT_VOLUME` | dark, 80 %, 75 % (first boot) |
 | `apps/voice_core.c` | `REC_MAX_SECONDS`, `TURN_TIMEOUT_US`, `RX_MAX_BYTES` | 10 s, 45 s, 3 MB |
 | `app_config.h` | `STOCKS_REFRESH_MS`, `STOCKS_RETRY_MS` | 60 s, 15 s |
@@ -445,7 +509,7 @@ rm sdkconfig && idf.py -p /dev/cu.usbmodem1101 build flash monitor
 ## Troubleshooting
 
 Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app`, `settings`,
-`net`, `voice`, `stocks`, `mcp`, `power`.
+`net`, `voice`, `stocks`, `mcp`, `power` (ESP-SR's own lines: `AFE`, `MODEL_LOADER`).
 
 | Symptom / log | Likely cause | Fix |
 | --- | --- | --- |
@@ -454,6 +518,13 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app
 | Settings > Status "Wrong password?" (`reason 15`/`202`) | Password | Settings > Password |
 | Home shows "Fusion Apps" instead of the time | NTP hasn't synced yet | Wait for Wi-Fi; the clock appears within seconds |
 | Voice chat: "Set the server URL: swipe up" | URL doesn't start with `wss://` | Swipe up > Server URL |
+| Settings > Wake word "No model: run idf.py flash"; log `No "jarvis" wake word model` or `Can not find model in partition table` | The model partition wasn't written (`app-flash` skips it) or `CONFIG_SR_WN_WN9_JARVIS_TTS` isn't in `sdkconfig` | `grep JARVIS sdkconfig`; if missing, `rm sdkconfig && idf.py set-target esp32s3`; then `idf.py build flash` |
+| Striped or half-drawn screen, `Draw bitmap failed: ESP_ERR_NO_MEM` | Not enough internal DMA RAM for one draw band | Check the boot log says `12-line draw bands`; try `APP_LVGL_BUF_LINES 8` |
+| `Draw bitmap failed` when Voice chat opens (wake word build) | The internal-RAM settings in `sdkconfig.defaults` aren't in `sdkconfig` yet | `grep IRAM_OPT sdkconfig` should show `# CONFIG_ESP_WIFI_IRAM_OPT is not set`; if not, `rm sdkconfig && idf.py set-target esp32s3` and rebuild |
+| "Wake word off: low memory"; log `Wake word off: not enough internal RAM left` | The wake word engine would leave too little internal RAM for the display | The log line says how much it took; lower `WAKE_MIN_*` in `app_config.h` only if the display still draws fine (no `Draw bitmap failed`) |
+| Wakes up by itself (TV, conversation) | WakeNet false trigger | The 5 s no-speech timeout puts it back; if it happens often, turn the wake word off or try another word |
+| Says "Jarvis" but nothing happens | Too far or too quiet, or still "Thinking..."/"Speaking..." (detection is off then) | Wait for the green ring and **Say "Jarvis"**; speak toward the board from 1-2 m |
+| The turn ends too early / runs on to 10 s | End-of-speech timing, or a noisy room | Adjust `WAKE_END_SILENCE_MS`; in a noisy room hold to talk works better |
 | "Server refused the connection - check the API key" | Handshake rejected (code 1006) | Swipe up > API key |
 | "Can't reach the server - check the URL" | Host, port, path or TLS | Check the URL; for a new host see "TLS certificate" |
 | `No matching trusted root certificate found` | Host not covered by `server_ca.pem` or the CA bundle | Put the host in `secrets.h`, refresh `server_ca.pem` |

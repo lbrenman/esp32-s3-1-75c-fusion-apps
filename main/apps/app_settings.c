@@ -25,6 +25,8 @@ static ui_row_t    s_about_row;
 static lv_timer_t *s_timer;
 static int32_t     s_keep_scroll = -1;   /* restore the scroll position after a theme rebuild */
 
+static void refresh_wake_row(void);
+
 /* ---------------------------------------------------------------- helpers */
 /* A Wi-Fi name as the font can show it ("Leor Brenman’s iPhone" -> "Leor Brenman's iPhone").
  * Display only: the real name (bytes) is what gets saved and joined. */
@@ -110,6 +112,7 @@ static void tick_cb(lv_timer_t *t)
 {
     refresh_rows();
     if (s_scr) refresh_system_rows();
+    refresh_wake_row();
 }
 
 static void delete_cb(lv_event_t *e)
@@ -346,6 +349,37 @@ static void conv_label(char *buf, size_t len)
 }
 
 static ui_row_t s_conv_row;
+static ui_toggle_row_t s_wake_row;
+
+static const char *wake_text(void)
+{
+    switch (voice_wake_status()) {
+    case WAKE_ON:        return "Say \"" WAKE_WORD_LABEL "\" in Voice chat";
+    case WAKE_NO_MODEL:  return "No model: run idf.py flash";
+    case WAKE_NO_MEMORY: return "Paused: low memory";
+    default:             return "Off: hold to talk";
+    }
+}
+
+static void refresh_wake_row(void)
+{
+    if (!s_scr || !s_wake_row.value) return;
+    wake_status_t ws = voice_wake_status();
+    lv_label_set_text(s_wake_row.value, wake_text());
+    uint32_t c = ws == WAKE_ON ? UI_C_PURPLE : ws == WAKE_OFF ? UI_C_GRAY : UI_C_ORANGE;
+    lv_obj_set_style_bg_color(lv_obj_get_child(s_wake_row.row, 0), lv_color_hex(c), 0);
+}
+
+static void wake_cb(lv_event_t *e)
+{
+    bool on = lv_obj_has_state(lv_event_get_target_obj(e), LV_STATE_CHECKED);
+    app_settings_t cfg;
+    settings_get(&cfg);
+    cfg.wake_word = on;
+    settings_set(&cfg);
+    voice_set_wake_word(on);
+    refresh_wake_row();
+}
 
 static void do_new_conversation(void *user)
 {
@@ -376,6 +410,7 @@ static void do_reset(void *user)
     settings_get(&cfg);
     bsp_display_brightness_set(cfg.brightness);
     voice_set_volume(cfg.volume);
+    voice_set_wake_word(cfg.wake_word);
     net_reconnect();
     voice_reconnect();
     stocks_set_auto(cfg.stocks_auto);
@@ -422,6 +457,7 @@ static lv_obj_t *settings_build(void *arg)
     conv_label(conv, sizeof(conv));
     s_conv_row = ui_row(list, ICON_COMMENT, UI_C_PURPLE, "Conversation", conv, NULL, NULL);
     ui_row(list, ICON_PEN, UI_C_PURPLE, "New conversation", NULL, new_conv_cb, NULL);
+    s_wake_row = ui_row_toggle(list, ICON_WAVE, UI_C_PURPLE, "Wake word", "", cfg.wake_word, wake_cb, NULL);
 
     ui_section(list, "SYSTEM");
     s_batt_row = ui_row(list, ICON_BATTERY_3Q, UI_C_GREEN, "Battery", "", NULL, NULL);
@@ -431,6 +467,7 @@ static lv_obj_t *settings_build(void *arg)
     ui_row(list, ICON_RESET, UI_C_RED, "Reset settings", NULL, reset_cb, NULL);
 
     refresh_rows();
+    refresh_wake_row();
     if (s_timer) lv_timer_delete(s_timer);
     s_timer = lv_timer_create(tick_cb, 1000, NULL);
     lv_obj_add_event_cb(scr, delete_cb, LV_EVENT_DELETE, NULL);

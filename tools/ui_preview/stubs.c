@@ -19,7 +19,7 @@ esp_err_t bsp_display_brightness_set(int p) { printf("brightness %d\n", p); retu
 
 static app_settings_t s = { "Home-WiFi", "example-password", "wss://voice.example.com:4443/ws/speech",
                             "example-api-key-abcd", 1, 80, 75, "3f2a9c1e-7b4d-4e21-9a6f-0c8d5e11c11e",
-                            "https://fusion.example.com:4443/FusionStockWatchListMCP", "example-mcp-key-wxyz", 1 };
+                            "https://fusion.example.com:4443/FusionStockWatchListMCP", "example-mcp-key-wxyz", 1, 1 };
 void settings_init(void) {}
 void settings_get(app_settings_t *o) { *o = s; }
 esp_err_t settings_set(const app_settings_t *i) { s = *i; printf("settings saved (dark=%d)\n", s.dark_mode); return 0; }
@@ -62,8 +62,16 @@ void voice_ptt_press(void) { printf("ptt press\n"); if (!g_want) { voice_set_con
 void voice_ptt_release(void) { printf("ptt release\n"); if (g_vs == VOICE_LISTENING) g_vs = VOICE_THINKING; }
 void voice_ptt_cancel(void) { printf("ptt cancel\n"); if (g_vs == VOICE_LISTENING) g_vs = VOICE_READY; }
 voice_state_t voice_state(void) { return g_vs; }
+/* wake word: sim.c sets g_wake_status and g_fg decides whether it's listening */
+wake_status_t g_wake_status = WAKE_ON;
+bool g_fg = false;
+void voice_set_wake_word(bool on) { printf("voice_set_wake_word %d\n", on); g_wake_status = on ? WAKE_ON : WAKE_OFF; }
+wake_status_t voice_wake_status(void) { return g_wake_status; }
+bool voice_wake_listening(void) { return g_wake_status == WAKE_ON && g_fg && g_want; }
+void voice_set_foreground(bool on) { g_fg = on; }
 const char *voice_state_text(voice_state_t st) {
     static const char *t[] = {"Off","Waiting for Wi-Fi...","Connecting...","Hold to talk","Listening...","Thinking...","Speaking...","Not connected","Disconnected"};
+    if (st == VOICE_READY && voice_wake_listening()) return "Say \"Jarvis\"";
     return t[st]; }
 bool voice_connected(void) { return g_vs >= VOICE_READY && g_vs != VOICE_ERROR; }
 int64_t voice_idle_us(void) { return 0; }

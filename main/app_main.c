@@ -18,6 +18,7 @@
 #include "bsp/display.h"
 
 #include "settings_store.h"
+#include "display_start.h"
 #include "net.h"
 #include "voice.h"
 #include "stocks.h"
@@ -37,7 +38,7 @@ void app_main(void)
     app_settings_t cfg;
     settings_get(&cfg);
 
-    lv_display_t *disp = bsp_display_start();
+    lv_display_t *disp = app_display_start();     /* bsp_display_start() with smaller draw bands */
     if (!disp) {
         ESP_LOGE(TAG, "Display init failed");
         return;

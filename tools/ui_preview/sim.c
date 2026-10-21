@@ -167,6 +167,26 @@ int main(void)
     shot("14_settings_dark");
     swipe(233, 380, 233, 120);           /* scroll */
     shot("15_settings_scrolled");
+    {   /* wake word switch: on, off, and the "low memory" state */
+        extern wake_status_t g_wake_status;
+        lv_obj_t *l = find_text(lv_screen_active(), "Wake word");
+        lv_obj_scroll_to_view_recursive(l, LV_ANIM_OFF);
+        step(1100);
+        shot("15b_settings_wake_on");
+        g_wake_status = WAKE_NO_MEMORY;              /* what the engine reports when RAM is short */
+        step(1100);
+        shot("15c_settings_wake_lowmem");
+        lv_obj_t *row = lv_obj_get_parent(lv_obj_get_parent(l));
+        lv_obj_t *wsw = lv_obj_get_child(row, -1);
+        lv_area_t a; lv_obj_get_coords(wsw, &a);
+        tap((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);   /* off */
+        step(1100);
+        shot("15d_settings_wake_off");
+        tap((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);   /* back on */
+        step(1100);
+        printf("wake status after re-enable: %d (1 = on)\n", g_wake_status);
+        lv_obj_scroll_to_y(lv_obj_get_parent(row), 0, LV_ANIM_OFF);
+    }
     swipe(233, 120, 233, 400);
     tap_text("Network");
     step(600);

@@ -60,6 +60,7 @@ static void load_defaults(app_settings_t *s)
     strlcpy(s->mcp_url, STOCKS_MCP_URL, sizeof(s->mcp_url));
     strlcpy(s->mcp_api_key, STOCKS_MCP_API_KEY, sizeof(s->mcp_api_key));
     s->stocks_auto = DEFAULT_STOCKS_AUTO;
+    s->wake_word   = DEFAULT_WAKE_WORD;
 }
 
 static void get_str(nvs_handle_t h, const char *key, char *dst, size_t cap)
@@ -92,6 +93,7 @@ void settings_init(void)
     if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
         uint8_t dark = s_cur.dark_mode;
         uint8_t stk_auto = s_cur.stocks_auto;
+        uint8_t wake = s_cur.wake_word;
         get_str(h, "ssid",   s_cur.wifi_ssid,  sizeof(s_cur.wifi_ssid));
         get_str(h, "pass",   s_cur.wifi_pass,  sizeof(s_cur.wifi_pass));
         get_str(h, "url",    s_cur.ws_url,     sizeof(s_cur.ws_url));
@@ -103,8 +105,10 @@ void settings_init(void)
         get_str(h, "mcpurl", s_cur.mcp_url,     sizeof(s_cur.mcp_url));
         get_str(h, "mcpkey", s_cur.mcp_api_key, sizeof(s_cur.mcp_api_key));
         get_u8(h, "stkauto", &stk_auto);
+        get_u8(h, "wake",   &wake);
         s_cur.dark_mode = dark != 0;
         s_cur.stocks_auto = stk_auto != 0;
+        s_cur.wake_word = wake != 0;
         nvs_close(h);
         ESP_LOGI(TAG, "Loaded saved settings");
     } else {
@@ -166,6 +170,7 @@ esp_err_t settings_set(const app_settings_t *in)
     if (strcmp(old.mcp_url, in->mcp_url))       err |= nvs_set_str(h, "mcpurl", in->mcp_url);
     if (strcmp(old.mcp_api_key, in->mcp_api_key)) err |= nvs_set_str(h, "mcpkey", in->mcp_api_key);
     if (old.stocks_auto != in->stocks_auto)     err |= nvs_set_u8(h, "stkauto", in->stocks_auto ? 1 : 0);
+    if (old.wake_word != in->wake_word)         err |= nvs_set_u8(h, "wake", in->wake_word ? 1 : 0);
     err |= nvs_commit(h);
     nvs_close(h);
 

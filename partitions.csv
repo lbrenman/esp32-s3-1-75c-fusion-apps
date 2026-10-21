@@ -4,3 +4,6 @@ nvs,      data, nvs,     0x9000,  0x6000,
 phy_init, data, phy,     0xf000,  0x1000,
 factory,  app,  factory, ,        8M,
 storage,  data, spiffs,  ,        7M,
+# ESP-SR models (the wake word); idf.py flash fills it from the CONFIG_SR_* models in sdkconfig.
+# Keep it small: ESP-SR maps the whole partition into memory at boot.
+model,    data, spiffs,  ,        1M,

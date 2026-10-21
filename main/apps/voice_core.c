@@ -1,10 +1,13 @@
 /*
- * voice_core.c — push-to-talk engine for the voice-chat app (ported from voice_chat/main.c)
+ * voice_core.c — the voice-chat engine (push-to-talk ported from voice_chat/main.c, plus a wake word)
  *
  * While the app is open: hold to record 16 kHz mono, release to send ONE binary WebSocket frame
- * (a WAV file) to the voice server. The server's JSON text frames (TRANSCRIBED_REQUEST / RESPONSE /
- * ERROR) become on-screen text, and its binary reply audio (MP3, WAV or raw 16-bit PCM, detected
- * automatically) plays through the speaker. MP3 is decoded on the device with minimp3 (CC0).
+ * (a WAV file) to the voice server. With the wake word on, the engine also listens while the
+ * Voice chat screen is showing: say "Jarvis" (WAKE_WORD_LABEL), then your request; ESP-SR's voice
+ * activity detection ends the turn when you stop talking, and the same WAV goes to the server.
+ * The server's JSON text frames (TRANSCRIBED_REQUEST / RESPONSE / ERROR) become on-screen text,
+ * and its binary reply audio (MP3, WAV or raw 16-bit PCM, detected automatically) plays through
+ * the speaker. MP3 is decoded on the device with minimp3 (CC0).
  *
  * The WebSocket is opened when the app opens and closed when it closes. Server URL and API key come
  * from the settings store (first boot: secrets.h), so they can be changed on the device.
@@ -21,6 +24,7 @@
 #include <strings.h>
 #include <ctype.h>
 #include <errno.h>
+#include <math.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -38,6 +42,11 @@
 #include "cJSON.h"
 
 #include "bsp_board_extra.h"
+
+/* ESP-SR: audio front end (AFE) with WakeNet (wake word) and VAD (voice activity detection) */
+#include "esp_afe_sr_models.h"
+#include "esp_afe_config.h"
+#include "model_path.h"
 
 #include "voice.h"
 #include "text_ascii.h"
@@ -71,6 +80,16 @@ extern const char server_ca_pem_start[] asm("_binary_server_ca_pem_start");
 #define REPLY_MAX_CHARS     320             // what fits on the round screen
 #define NOTE_MAX_CHARS      96
 #define RESEND_WAIT_MS      20000           // after a failed send: wait this long for the reconnect, then resend once
+#define MAX_SAMPLES         ((size_t)REC_MAX_SECONDS * REC_RATE)
+
+/* wake word engine (see "wake word" below) */
+#define WAKE_PREROLL_MS     400             // audio kept from just before you start talking
+#define WAKE_CHIME_IGNORE_MS 400            // the mic hears the chime: don't count it as speech
+#define WAKE_MIN_SPEECH_MS  400             // less voice than this (the end of "Jarvis", a cough): keep waiting
+#define WAKE_LEVEL_ABOVE_DB 12              // voice: this much louder than the room's noise floor...
+#define WAKE_LEVEL_MIN_DB   (-50)           // ...and at least this loud (dBFS)
+#define WAKE_REARM_MS       700             // after a reply: ignore wake words for this long (speaker echo)
+#define MODEL_PARTITION     "model"
 
 /* ------------------------------------------------------------------- state */
 typedef struct {
@@ -79,6 +98,7 @@ typedef struct {
 } play_item_t;
 
 enum { CMD_WAKE = 1, CMD_RESTART = 2 };
+enum { REC_CMD_PTT = 1, REC_CMD_SEND = 2 };         /* rec_task: record while held / send what the wake engine captured */
 
 static volatile voice_state_t s_state = VOICE_OFF;
 static volatile bool    s_active = false;           // the app is open
@@ -94,6 +114,22 @@ static bool             s_audio_ok = false;         // codec + tasks started
 static volatile int64_t s_last_activity_us = 0;
 static volatile int64_t s_turn_start_us = 0;
 static volatile int64_t s_last_rx_us = 0;
+
+/* wake word */
+static srmodel_list_t  *s_models = NULL;            /* models in the "model" partition */
+static char            *s_wn_name = NULL;           /* the wake word model, e.g. "wn9_jarvis_tts" */
+static volatile bool    s_wake_enabled = false;     /* Settings switch */
+static volatile bool    s_wake_nomem = false;       /* turned itself off: not enough internal RAM */
+static volatile bool    s_fg = false;               /* the Voice chat screen is showing */
+static volatile bool    s_wl_running = false;       /* the wake engine runs and owns the microphone */
+static volatile bool    s_rec_busy = false;         /* rec_task is reading the microphone (hold to talk) */
+static volatile bool    s_hold_req = false;         /* a touch asked the wake engine to start recording */
+static volatile size_t  s_cap_n = 0;                /* samples the wake engine captured, for rec_task to send */
+static TaskHandle_t     s_wake_task = NULL;
+
+/* the recording, as a WAV file: header + up to REC_MAX_SECONDS of 16-bit mono (PSRAM) */
+static uint8_t *s_wav = NULL;
+static int16_t *s_pcm = NULL;
 
 static TaskHandle_t  s_rec_task = NULL;
 static QueueHandle_t s_play_q = NULL;
@@ -192,7 +228,7 @@ const char *voice_state_text(voice_state_t st)
     case VOICE_OFF:        return "Off";
     case VOICE_WAIT_WIFI:  return "Waiting for Wi-Fi...";
     case VOICE_CONNECTING: return "Connecting...";
-    case VOICE_READY:      return "Hold to talk";
+    case VOICE_READY:      return s_wl_running ? "Say \"" WAKE_WORD_LABEL "\"" : "Hold to talk";
     case VOICE_LISTENING:  return "Listening...";
     case VOICE_THINKING:   return "Thinking...";
     case VOICE_SPEAKING:   return "Speaking...";
@@ -720,8 +756,10 @@ static void ctl_task(void *arg)
         diag_heartbeat();
 
 #if VOICE_IDLE_DISCONNECT_MS > 0
-        /* close an idle connection, on any screen; tap the mic (or the switch) to reconnect */
-        if (s_state == VOICE_READY && voice_idle_us() > (int64_t)VOICE_IDLE_DISCONNECT_MS * 1000) {
+        /* close an idle connection, on any screen; tap the mic (or the switch) to reconnect.
+         * Not with the wake word on: then the connection has to be ready when you say it. */
+        if (s_state == VOICE_READY && voice_wake_status() != WAKE_ON &&
+            voice_idle_us() > (int64_t)VOICE_IDLE_DISCONNECT_MS * 1000) {
             ESP_LOGI(TAG, "Idle for %d min: disconnecting", VOICE_IDLE_DISCONNECT_MS / 60000);
             s_want = false;
             set_note("Disconnected after %d min idle", VOICE_IDLE_DISCONNECT_MS / 60000);
@@ -738,6 +776,7 @@ void voice_set_active(bool active)
     if (active) {
         text_clear();
         s_cfg_error = false;
+        s_wake_nomem = false;                /* try the wake word again (memory may be free now) */
         s_want = true;                       /* connection switch is on by default */
         s_active = true;
         s_last_activity_us = esp_timer_get_time();
@@ -754,6 +793,7 @@ void voice_set_active(bool active)
     }
     uint32_t cmd = CMD_WAKE;
     xQueueSend(s_ctl_q, &cmd, 0);
+    if (s_wake_task) xTaskNotifyGive(s_wake_task);
 }
 
 void voice_reconnect(void)
@@ -786,6 +826,7 @@ void voice_set_connected(bool on)
     if (s_active) set_state(on ? (net_is_up() ? VOICE_CONNECTING : VOICE_WAIT_WIFI) : VOICE_DISCONNECTED);
     uint32_t cmd = CMD_WAKE;
     xQueueSend(s_ctl_q, &cmd, 0);
+    if (s_wake_task) xTaskNotifyGive(s_wake_task);
 }
 
 bool voice_wants_connection(void) { return s_want; }
@@ -805,10 +846,17 @@ void voice_ptt_press(void)
         voice_set_connected(true);
         return;
     }
-    if (s_rec_task && !s_resending && s_state == VOICE_READY && s_ws_connected && !s_recording) {
-        s_rec_cancel = false;
-        s_recording = true;
-        xTaskNotifyGive(s_rec_task);
+    if (s_resending || s_state != VOICE_READY || !s_ws_connected || s_recording) return;
+    s_rec_cancel = false;
+    s_recording = true;
+    if (s_wl_running) {
+        /* the wake engine owns the microphone: it records from its own audio stream */
+        s_hold_req = true;
+    } else if (s_rec_task) {
+        s_rec_busy = true;
+        xTaskNotify(s_rec_task, REC_CMD_PTT, eSetValueWithOverwrite);
+    } else {
+        s_recording = false;
     }
 }
 
@@ -852,100 +900,547 @@ static bool send_wav(const uint8_t *wav, size_t total)
 #endif
     return ok;
 }
+
+/* Sends the first n samples of s_wav as one turn, resending once over a new connection if the
+ * link broke mid-send. Runs in rec_task only (the send can block for up to ~35 s). */
+static void send_turn(size_t n)
+{
+    uint32_t ms = (uint32_t)(n * 1000 / REC_RATE);
+    if (!s_ws_connected) {
+        set_state(VOICE_CONNECTING);
+        set_note("Not connected to the server");
+        return;
+    }
+
+    write_wav_header(s_wav, (uint32_t)(n * sizeof(int16_t)), REC_RATE, 1, 16);
+    size_t total = WAV_HEADER_BYTES + n * sizeof(int16_t);
+
+    s_turn_start_us = esp_timer_get_time();
+    s_last_rx_us = s_turn_start_us;
+    set_state(VOICE_THINKING);
+
+    int conn_before = s_dg.connects;
+    bool ok = send_wav(s_wav, total);
+
+    if (!ok && LIVE()) {
+        /* The link broke mid-send (the library reconnects by itself). Wait for a NEW connection,
+         * not the stale flag of the broken one, then resend the same recording once. */
+        ESP_LOGW(TAG, "Send failed; waiting up to %d s for the reconnect to resend", RESEND_WAIT_MS / 1000);
+        s_resending = true;
+        set_note("Connection lost - resending...");
+        set_state(VOICE_THINKING);
+        int64_t deadline = esp_timer_get_time() + (int64_t)RESEND_WAIT_MS * 1000;
+        while (LIVE() && esp_timer_get_time() < deadline &&
+               !(s_ws_connected && s_dg.connects > conn_before)) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+        if (LIVE() && s_ws_connected && s_dg.connects > conn_before) {
+            ESP_LOGI(TAG, "Reconnected: resending the recording");
+            s_turn_start_us = esp_timer_get_time();
+            s_last_rx_us = s_turn_start_us;
+            ok = send_wav(s_wav, total);
+            if (ok) set_note("%s", "");
+        }
+        s_resending = false;
+    }
+
+    if (ok) {
+        ESP_LOGI(TAG, "Sent %u bytes (%u ms of audio)", (unsigned)total, (unsigned)ms);
+    } else {
+        ESP_LOGE(TAG, "Send failed");
+        set_state(s_ws_connected ? VOICE_READY : VOICE_CONNECTING);
+        set_note("Send failed - try again");
+    }
+}
+
+/* Hold to talk without the wake word: reads the microphone while the finger is down.
+ * Returns the number of samples to send, or 0 if the recording was discarded. */
+static size_t record_held(int16_t *io, size_t io_bytes)
+{
+    set_state(VOICE_LISTENING);
+    text_clear();
+
+    size_t got = 0;
+    bsp_extra_i2s_read(io, io_bytes, &got, 200);   // drop stale buffered audio
+
+    size_t n = 0;
+    while (s_recording && n < MAX_SAMPLES) {
+        got = 0;
+        if (bsp_extra_i2s_read(io, io_bytes, &got, 1000) != ESP_OK || got == 0) {
+            continue;
+        }
+        size_t frames = got / (I2S_CHANNELS * sizeof(int16_t));
+        for (size_t i = 0; i < frames && n < MAX_SAMPLES; i++) {
+            int32_t mixed = ((int32_t)io[2 * i] + (int32_t)io[2 * i + 1]) / 2;
+            s_pcm[n++] = (int16_t)mixed;
+        }
+    }
+    s_recording = false;
+    s_rec_busy = false;
+    s_last_activity_us = esp_timer_get_time();
+
+    uint32_t ms = (uint32_t)(n * 1000 / REC_RATE);
+    if (s_rec_cancel || !LIVE()) {     // the touch was a swipe, or the app closed / disconnected
+        s_rec_cancel = false;
+        ESP_LOGI(TAG, "Discarded %u ms of audio", (unsigned)ms);
+        set_state(VOICE_READY);
+        return 0;
+    }
+    ESP_LOGI(TAG, "Recorded %u ms", (unsigned)ms);
+
+    if (ms < REC_MIN_MS) {
+        set_state(VOICE_READY);
+        set_note("Hold while you talk");
+        return 0;
+    }
+    return n;
+}
+
 static void rec_task(void *arg)
 {
     const size_t io_bytes = READ_FRAMES * I2S_CHANNELS * sizeof(int16_t);
     int16_t *io = heap_caps_malloc(io_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    const size_t max_samples = (size_t)REC_MAX_SECONDS * REC_RATE;
-    uint8_t *wav = heap_caps_malloc(WAV_HEADER_BYTES + max_samples * sizeof(int16_t),
-                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!io || !wav) {
+    if (!io) {
         ESP_LOGE(TAG, "Out of memory for recording buffers");
         vTaskDelete(NULL);
     }
-    int16_t *pcm = (int16_t *)(wav + WAV_HEADER_BYTES);
 
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        set_state(VOICE_LISTENING);
-        text_clear();
+        uint32_t cmd = 0;
+        xTaskNotifyWait(0, UINT32_MAX, &cmd, portMAX_DELAY);
 
-        size_t got = 0;
-        bsp_extra_i2s_read(io, io_bytes, &got, 200);   // drop stale buffered audio
+        size_t n;
+        if (cmd == REC_CMD_SEND) {
+            n = s_cap_n;                       /* the wake engine filled s_pcm */
+        } else if (cmd == REC_CMD_PTT) {
+            n = record_held(io, io_bytes);
+        } else {
+            continue;
+        }
+        if (n > 0 && LIVE()) {
+            send_turn(n);
+        } else if (cmd == REC_CMD_SEND && s_state == VOICE_THINKING) {
+            set_state(VOICE_READY);
+        }
+    }
+}
 
-        size_t n = 0;
-        while (s_recording && n < max_samples) {
-            got = 0;
-            if (bsp_extra_i2s_read(io, io_bytes, &got, 1000) != ESP_OK || got == 0) {
+/* ------------------------------------------------------------ wake word
+ * One task runs ESP-SR's audio front end (AFE) with WakeNet (the wake word) and VAD (voice
+ * activity detection), and while it runs it owns the microphone. It reads 32 ms of audio at a
+ * time, feeds the AFE and acts on what comes out:
+ *
+ *   READY + wake word   chime, LISTENING; record until the VAD hears WAKE_END_SILENCE_MS of
+ *                       silence after you talk (or WAKE_NO_SPEECH_MS of nothing): send
+ *   touch and hold      LISTENING; record until release: send
+ *   quick tap           LISTENING; record until you stop talking, as after the wake word
+ *
+ * The audio sent is the same as with hold to talk: both mics mixed to mono, no processing (no
+ * AEC, noise suppression or AGC in the AFE), so the server hears what it always heard.
+ * WakeNet runs only while the engine is READY, so a reply playing through the speaker can't wake
+ * it. The AFE is created when listening should start (Voice chat screen open, connection on, the
+ * setting on) and destroyed when it should stop, which gives its memory back. */
+
+typedef enum { CAP_IDLE, CAP_HOLD, CAP_WAIT_SPEECH, CAP_SPEECH } cap_t;
+
+static const esp_afe_sr_iface_t *s_afe = NULL;
+static esp_afe_sr_data_t        *s_afe_data = NULL;
+static int16_t *s_feed = NULL;          /* one feed chunk, stereo as read, mixed to mono in place */
+static int      s_feed_chunk = 0;       /* samples per channel per feed */
+static int      s_fetch_chunk = 0;      /* samples per fetch result */
+static int16_t *s_chime = NULL;         /* stereo 16 kHz */
+static size_t   s_chime_bytes = 0;
+
+wake_status_t voice_wake_status(void)
+{
+    if (!s_wake_enabled) return WAKE_OFF;
+    if (!s_wn_name)      return WAKE_NO_MODEL;
+    if (s_wake_nomem)    return WAKE_NO_MEMORY;
+    return WAKE_ON;
+}
+
+bool voice_wake_listening(void) { return s_wl_running; }
+
+void voice_set_wake_word(bool on)
+{
+    s_wake_enabled = on;
+    s_wake_nomem = false;
+    ESP_LOGI(TAG, "Wake word %s", on ? "on" : "off");
+    if (s_wake_task) xTaskNotifyGive(s_wake_task);
+}
+
+void voice_set_foreground(bool on)
+{
+    s_fg = on;
+    if (s_wake_task) xTaskNotifyGive(s_wake_task);
+}
+
+static bool wake_should_run(void)
+{
+    return s_wn_name && s_wake_enabled && !s_wake_nomem && s_audio_ok && s_active && s_fg && s_want;
+}
+
+static bool ready_for_turn(void)
+{
+    return s_state == VOICE_READY && s_ws_connected && !s_resending;
+}
+
+static void make_chime(void)
+{
+#if WAKE_CHIME
+    /* two short rising notes (E6, A6) with soft edges: "I'm listening" */
+    static const float freqs[2] = { 1318.5f, 1760.0f };
+    const int note = REC_RATE * 70 / 1000, gap = REC_RATE * 20 / 1000, ramp = REC_RATE * 8 / 1000;
+    const int frames = 2 * note + gap;
+    s_chime_bytes = (size_t)frames * 2 * sizeof(int16_t);
+    s_chime = heap_caps_calloc(1, s_chime_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_chime) return;
+    for (int k = 0; k < 2; k++) {
+        int off = k * (note + gap);
+        for (int i = 0; i < note; i++) {
+            float env = 1.0f;
+            if (i < ramp) env = (float)i / ramp;
+            else if (i > note - ramp) env = (float)(note - i) / ramp;
+            int16_t v = (int16_t)(5000.0f * env * sinf(2.0f * (float)M_PI * freqs[k] * i / REC_RATE));
+            s_chime[2 * (off + i)] = v;
+            s_chime[2 * (off + i) + 1] = v;
+        }
+    }
+#endif
+}
+
+static void free_internal(size_t *free_kb, size_t *dma_kb)
+{
+    *free_kb = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024;
+    *dma_kb  = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) / 1024;
+}
+
+static void wake_stop(void)
+{
+    if (s_afe_data) {
+        s_afe->destroy(s_afe_data);
+        s_afe_data = NULL;
+    }
+    if (s_feed) {
+        heap_caps_free(s_feed);
+        s_feed = NULL;
+    }
+    s_wl_running = false;
+    if (s_hold_req) {                          /* a touch was waiting for this engine */
+        s_hold_req = false;
+        s_recording = false;
+    }
+    size_t f, d;
+    free_internal(&f, &d);
+    ESP_LOGI(TAG, "Wake word stopped (free internal %u KB, largest DMA block %u KB)", (unsigned)f, (unsigned)d);
+}
+
+static bool wake_start(void)
+{
+    size_t free0, dma0;
+    free_internal(&free0, &dma0);
+
+    afe_config_t *cfg = afe_config_init("M", s_models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
+    if (!cfg) {
+        ESP_LOGE(TAG, "afe_config_init failed");
+        s_wake_nomem = true;
+        return false;
+    }
+    cfg->aec_init = false;                 /* no playback reference channel */
+    cfg->se_init = false;
+    cfg->ns_init = false;
+    cfg->agc_init = false;                 /* send the audio as recorded */
+    cfg->vad_init = true;
+    cfg->vad_mode = VAD_MODE_3;
+    cfg->vad_min_speech_ms = 128;
+    cfg->vad_min_noise_ms = 300;          /* short hangover: the end of a turn is timed in wake_task */
+    cfg->wakenet_init = true;
+    cfg->wakenet_model_name = s_wn_name;
+    cfg->wakenet_model_name_2 = NULL;
+    cfg->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
+    cfg->afe_perferred_core = 1;
+    cfg->afe_perferred_priority = 5;
+
+    s_afe = esp_afe_handle_from_config(cfg);
+    s_afe_data = s_afe ? s_afe->create_from_config(cfg) : NULL;
+    afe_config_free(cfg);
+    if (!s_afe_data) {
+        ESP_LOGE(TAG, "Could not start the wake word engine (out of memory?)");
+        s_wake_nomem = true;
+        return false;
+    }
+
+    s_feed_chunk = s_afe->get_feed_chunksize(s_afe_data);
+    s_fetch_chunk = s_afe->get_fetch_chunksize(s_afe_data);
+    esp_log_level_set("AFE", ESP_LOG_ERROR);   /* its per-frame warnings would flood the log */
+    int nch = s_afe->get_feed_channel_num(s_afe_data);
+    size_t bytes = (size_t)s_feed_chunk * I2S_CHANNELS * sizeof(int16_t);
+    s_feed = heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!s_feed) s_feed = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    size_t free1, dma1;
+    free_internal(&free1, &dma1);
+    ESP_LOGI(TAG, "Wake word \"%s\" (%s) listening: %d samples per feed, %d per fetch, %d ch; it took %d KB internal RAM, "
+             "%u KB left (largest DMA block %u KB)", WAKE_WORD_LABEL, s_wn_name, s_feed_chunk, s_fetch_chunk, nch,
+             (int)free0 - (int)free1, (unsigned)free1, (unsigned)dma1);
+
+    if (!s_feed || nch != 1 || s_fetch_chunk <= 0 || free1 < WAKE_MIN_FREE_INTERNAL_KB || dma1 < WAKE_MIN_DMA_BLOCK_KB) {
+        ESP_LOGE(TAG, "Wake word off: %s (needs %d KB internal free and a %d KB DMA block; "
+                 "see WAKE_MIN_* in app_config.h)", !s_feed ? "no feed buffer" : nch != 1 ? "unexpected channel count" :
+                 "not enough internal RAM left", WAKE_MIN_FREE_INTERNAL_KB, WAKE_MIN_DMA_BLOCK_KB);
+        wake_stop();
+        s_wake_nomem = true;
+        set_note("Wake word off: low memory");
+        return false;
+    }
+    return true;
+}
+
+/* Level of a block of samples in dBFS (0 = full scale, about -90 = digital silence) */
+static float level_db(const int16_t *x, int n)
+{
+    if (n <= 0) return -96.0f;
+    double sum = 0;
+    for (int i = 0; i < n; i++) sum += (double)x[i] * x[i];
+    double rms = sqrt(sum / n);
+    return rms < 1.0 ? -96.0f : (float)(20.0 * log10(rms / 32768.0));
+}
+
+/* The engine's main loop. Owns s_afe / s_afe_data; nothing else touches them. */
+static void wake_task(void *arg)
+{
+    cap_t   cap = CAP_IDLE;
+    size_t  n = 0;
+    int64_t start_us = 0, ignore_until_us = 0, armed_us = 0;
+    bool    saw_silence = false, wn_on = true;
+    int     pending = 0;                         /* samples fed but not fetched yet */
+    float   floor_db = -60.0f;                   /* the room's noise level, learned while idle */
+    int64_t voice_us = 0, last_voice_us = 0, dbg_us = 0;   /* voiced time in this turn, last voiced frame */
+
+    for (;;) {
+        if (!wake_should_run()) {
+            if (s_afe_data) {
+                if (cap != CAP_IDLE) {
+                    ESP_LOGI(TAG, "Discarded the recording (left Voice chat)");
+                    cap = CAP_IDLE;
+                    s_recording = false;
+                    if (s_state == VOICE_LISTENING) set_state(VOICE_READY);
+                }
+                wake_stop();
+            }
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(300));
+            continue;
+        }
+        if (!s_afe_data) {
+            /* Start once the screen has slid in and the server connection is up: the slide and the
+             * TLS handshake need internal RAM too, and together with the AFE's startup that was
+             * enough to make the display drop frames. Also wait for hold to talk to finish. */
+            if (s_rec_busy || !s_ws_connected || s_state != VOICE_READY) {
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
                 continue;
             }
-            size_t frames = got / (I2S_CHANNELS * sizeof(int16_t));
-            for (size_t i = 0; i < frames && n < max_samples; i++) {
-                int32_t mixed = ((int32_t)io[2 * i] + (int32_t)io[2 * i + 1]) / 2;
-                pcm[n++] = (int16_t)mixed;
+            s_wl_running = true;                 /* touches go to this engine from now on */
+            if (!wake_start()) {
+                s_wl_running = false;
+                if (s_hold_req) {
+                    s_hold_req = false;
+                    s_recording = false;
+                }
+                continue;
             }
+            cap = CAP_IDLE;
+            pending = 0;
+            wn_on = true;                        /* WakeNet starts enabled */
+            armed_us = esp_timer_get_time() + (int64_t)WAKE_REARM_MS * 1000;
         }
-        s_recording = false;
-        s_last_activity_us = esp_timer_get_time();
 
-        uint32_t ms = (uint32_t)(n * 1000 / REC_RATE);
-        if (s_rec_cancel || !LIVE()) {     // the touch was a swipe, or the app closed / disconnected
-            s_rec_cancel = false;
-            ESP_LOGI(TAG, "Discarded %u ms of audio", (unsigned)ms);
-            set_state(VOICE_READY);
+        /* 1. read one chunk (both mics), mix to mono in place, feed the AFE */
+        size_t want = (size_t)s_feed_chunk * I2S_CHANNELS * sizeof(int16_t), got = 0;
+        if (bsp_extra_i2s_read(s_feed, want, &got, 500) != ESP_OK || got < want) {
+            vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
-        ESP_LOGI(TAG, "Recorded %u ms", (unsigned)ms);
-
-        if (ms < REC_MIN_MS) {
-            set_state(VOICE_READY);
-            set_note("Hold while you talk");
-            continue;
+        for (int i = 0; i < s_feed_chunk; i++) {
+            s_feed[i] = (int16_t)(((int32_t)s_feed[2 * i] + (int32_t)s_feed[2 * i + 1]) / 2);
         }
-        if (!s_ws_connected) {
-            set_state(VOICE_CONNECTING);
-            set_note("Not connected to the server");
-            continue;
-        }
+        s_afe->feed(s_afe_data, s_feed);
+        pending += s_feed_chunk;
+        if (pending > 8 * s_fetch_chunk) pending = 8 * s_fetch_chunk;
 
-        write_wav_header(wav, (uint32_t)(n * sizeof(int16_t)), REC_RATE, 1, 16);
-        size_t total = WAV_HEADER_BYTES + n * sizeof(int16_t);
+        /* 2. handle what the AFE has ready (only fetch what was fed: an empty fetch logs a warning) */
+        while (pending >= s_fetch_chunk) {
+            afe_fetch_result_t *res = s_afe->fetch_with_delay(s_afe_data, pdMS_TO_TICKS(20));
+            if (!res || res->ret_value != ESP_OK) break;   /* not ready yet: next time */
+            pending -= s_fetch_chunk;
+            int64_t now = esp_timer_get_time();
 
-        s_turn_start_us = esp_timer_get_time();
-        s_last_rx_us = s_turn_start_us;
-        set_state(VOICE_THINKING);
+            /* Is this frame voice? ESP-SR's VAD, or clearly louder than the room (a backup that
+             * doesn't depend on the VAD's tuning). The noise floor follows quiet frames while idle. */
+            int    frame_n = res->data_size / (int)sizeof(int16_t);
+            float  db = level_db(res->data, frame_n);
+            if (cap == CAP_IDLE && ready_for_turn()) {   /* not while a reply plays */
+                floor_db += (db < floor_db ? 0.2f : 0.02f) * (db - floor_db);
+                if (floor_db < -75.0f) floor_db = -75.0f;
+            }
+            float  thr = floor_db + WAKE_LEVEL_ABOVE_DB;
+            if (thr < WAKE_LEVEL_MIN_DB) thr = WAKE_LEVEL_MIN_DB;
+            bool   voice = (res->vad_state == VAD_SPEECH) || db > thr;
+#if WAKE_DEBUG
+            if (cap != CAP_IDLE && now - dbg_us > 250 * 1000) {
+                dbg_us = now;
+                ESP_LOGI(TAG, "listen: vad=%d level=%.0f dB (voice above %.0f) -> %s", (int)res->vad_state, db, thr,
+                         voice ? "voice" : "quiet");
+            }
+#else
+            (void)dbg_us;
+#endif
 
-        int conn_before = s_dg.connects;
-        bool ok = send_wav(wav, total);
+            /* WakeNet only while waiting for a turn (never during a reply) */
+            bool want_wn = (cap == CAP_IDLE) && ready_for_turn();
+            if (want_wn != wn_on) {
+                if (want_wn) {
+                    s_afe->enable_wakenet(s_afe_data);
+                    armed_us = now + (int64_t)WAKE_REARM_MS * 1000;
+                } else {
+                    s_afe->disable_wakenet(s_afe_data);
+                }
+                wn_on = want_wn;
+            }
 
-        if (!ok && LIVE()) {
-            /* The link broke mid-send (the library reconnects by itself). Wait for a NEW connection,
-             * not the stale flag of the broken one, then resend the same recording once. */
-            ESP_LOGW(TAG, "Send failed; waiting up to %d s for the reconnect to resend", RESEND_WAIT_MS / 1000);
-            s_resending = true;
-            set_note("Connection lost - resending...");
+            /* a swipe, the connection switch or the app closing throws the recording away */
+            if (cap != CAP_IDLE && (s_rec_cancel || !LIVE())) {
+                s_rec_cancel = false;
+                s_recording = false;
+                ESP_LOGI(TAG, "Discarded %u ms of audio", (unsigned)(n * 1000 / REC_RATE));
+                cap = CAP_IDLE;
+                if (s_state == VOICE_LISTENING) set_state(VOICE_READY);
+                continue;
+            }
+
+            if (cap == CAP_IDLE) {
+                if (s_hold_req) {
+                    s_hold_req = false;
+                    if (ready_for_turn() && s_recording) {
+                        cap = CAP_HOLD;
+                        n = 0;
+                        start_us = now;
+                        text_clear();
+                        set_state(VOICE_LISTENING);
+                    } else {
+                        s_recording = false;
+                    }
+                } else if (wn_on && res->wakeup_state == WAKENET_DETECTED && now >= armed_us && ready_for_turn()) {
+                    ESP_LOGI(TAG, "Wake word heard (room noise %.0f dBFS)", floor_db);
+                    cap = CAP_WAIT_SPEECH;
+                    n = 0;
+                    start_us = now;
+                    saw_silence = false;
+                    voice_us = 0;
+                    text_clear();
+                    set_state(VOICE_LISTENING);
+                    s_last_activity_us = now;
+                    s_afe->disable_wakenet(s_afe_data);
+                    wn_on = false;
+                    if (s_chime) {
+                        size_t w = 0;
+                        bsp_extra_i2s_write(s_chime, s_chime_bytes, &w, 500);
+                    }
+                    ignore_until_us = esp_timer_get_time() + (int64_t)WAKE_CHIME_IGNORE_MS * 1000;
+                    continue;        /* this chunk is the wake word itself */
+                }
+                if (cap == CAP_IDLE) continue;
+            }
+
+            /* append this chunk to the recording */
+            int samples = res->data_size / (int)sizeof(int16_t);
+            if (samples > 0 && n < MAX_SAMPLES) {
+                size_t take = (size_t)samples;
+                if (take > MAX_SAMPLES - n) take = MAX_SAMPLES - n;
+                memcpy(s_pcm + n, res->data, take * sizeof(int16_t));
+                n += take;
+            }
+
+            bool finish = false;
+            switch (cap) {
+            case CAP_HOLD:
+                if (!s_recording) {                       /* released */
+                    if (now - start_us < (int64_t)WAKE_HOLD_TAP_MS * 1000) {
+                        /* a quick tap: listen hands-free, as after the wake word */
+                        cap = CAP_WAIT_SPEECH;
+                        start_us = now;
+                        saw_silence = true;
+                        voice_us = 0;
+                        ignore_until_us = 0;
+                    } else {
+                        finish = true;
+                    }
+                } else if (n >= MAX_SAMPLES) {
+                    s_recording = false;
+                    finish = true;
+                }
+                break;
+
+            case CAP_WAIT_SPEECH:
+                if (now < ignore_until_us) break;         /* the mic is hearing the chime */
+                if (!voice) {
+                    saw_silence = true;
+                } else {
+                    /* you started talking. After a pause, keep just a little audio from before it */
+                    size_t keep = (size_t)WAKE_PREROLL_MS * REC_RATE / 1000;
+                    if (saw_silence && n > keep) {
+                        memmove(s_pcm, s_pcm + (n - keep), keep * sizeof(int16_t));
+                        n = keep;
+                    }
+                    cap = CAP_SPEECH;
+                    last_voice_us = now;
+                    break;
+                }
+                if (now - start_us > (int64_t)WAKE_NO_SPEECH_MS * 1000 || n >= MAX_SAMPLES) {
+                    ESP_LOGI(TAG, "No request after the wake word");
+                    cap = CAP_IDLE;
+                    set_note("Didn't catch that");
+                    set_state(VOICE_READY);
+                }
+                break;
+
+            case CAP_SPEECH:
+                if (voice) {
+                    voice_us += (int64_t)frame_n * 1000000 / REC_RATE;
+                    last_voice_us = now;
+                } else if (now - last_voice_us > (int64_t)WAKE_END_SILENCE_MS * 1000) {
+                    if (voice_us < (int64_t)WAKE_MIN_SPEECH_MS * 1000) {
+                        /* only a blip (the tail of the wake word, a click): keep waiting */
+                        cap = CAP_WAIT_SPEECH;
+                        saw_silence = true;
+                        voice_us = 0;
+                        break;
+                    }
+                    finish = true;                        /* you stopped talking */
+                }
+                if (n >= MAX_SAMPLES) finish = true;
+                break;
+
+            default:
+                break;
+            }
+
+            if (!finish) continue;
+
+            /* hand the recording to rec_task, which sends it (sending can block for seconds) */
+            cap = CAP_IDLE;
+            s_recording = false;
+            s_last_activity_us = now;
+            uint32_t ms = (uint32_t)(n * 1000 / REC_RATE);
+            ESP_LOGI(TAG, "Recorded %u ms (voice %u ms)", (unsigned)ms, (unsigned)(voice_us / 1000));
+            if (ms < REC_MIN_MS) {
+                set_state(VOICE_READY);
+                continue;
+            }
+            s_cap_n = n;
+            s_turn_start_us = now;               /* the turn timer starts now, not when the send does */
+            s_last_rx_us = now;
             set_state(VOICE_THINKING);
-            int64_t deadline = esp_timer_get_time() + (int64_t)RESEND_WAIT_MS * 1000;
-            while (LIVE() && esp_timer_get_time() < deadline &&
-                   !(s_ws_connected && s_dg.connects > conn_before)) {
-                vTaskDelay(pdMS_TO_TICKS(200));
-            }
-            if (LIVE() && s_ws_connected && s_dg.connects > conn_before) {
-                ESP_LOGI(TAG, "Reconnected: resending the recording");
-                s_turn_start_us = esp_timer_get_time();
-                s_last_rx_us = s_turn_start_us;
-                ok = send_wav(wav, total);
-                if (ok) set_note("%s", "");
-            }
-            s_resending = false;
-        }
-
-        if (ok) {
-            ESP_LOGI(TAG, "Sent %u bytes (%u ms of audio)", (unsigned)total, (unsigned)ms);
-        } else {
-            ESP_LOGE(TAG, "Send failed");
-            set_state(s_ws_connected ? VOICE_READY : VOICE_CONNECTING);
-            set_note("Send failed - try again");
+            xTaskNotify(s_rec_task, REC_CMD_SEND, eSetValueWithOverwrite);
         }
     }
 }
@@ -1197,14 +1692,51 @@ esp_err_t voice_init(void)
         return ESP_FAIL;
     }
 
-    xTaskCreatePinnedToCore(rec_task, "rec", 6 * 1024, NULL, 6, &s_rec_task, 1);
+    s_wav = heap_caps_malloc(WAV_HEADER_BYTES + MAX_SAMPLES * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_wav) {
+        ESP_LOGE(TAG, "Out of memory for the recording buffer");
+        return ESP_FAIL;
+    }
+    s_pcm = (int16_t *)(s_wav + WAV_HEADER_BYTES);
+
+    /* Wake word model: idf.py flash writes the models chosen in sdkconfig to the "model" partition */
+    app_settings_t cfg;
+    settings_get(&cfg);
+    s_wake_enabled = cfg.wake_word;
+    s_models = esp_srmodel_init(MODEL_PARTITION);
+    if (s_models) s_wn_name = esp_srmodel_filter(s_models, ESP_WN_PREFIX, WAKE_WORD_MODEL);
+    if (s_wn_name) {
+        ESP_LOGI(TAG, "Wake word model %s (\"%s\"), %s", s_wn_name, WAKE_WORD_LABEL, s_wake_enabled ? "on" : "off in Settings");
+    } else {
+        ESP_LOGW(TAG, "No \"%s\" wake word model in the \"%s\" partition: hold to talk only. "
+                 "Check CONFIG_SR_WN_* in sdkconfig and run idf.py flash (not just app-flash)",
+                 WAKE_WORD_MODEL, MODEL_PARTITION);
+    }
+    make_chime();
+
+    /* Task stacks go in PSRAM where they can: internal RAM is what the display (and the wake word)
+     * run short of. These tasks never write to flash, which is what a PSRAM stack can't do. */
+    if (xTaskCreatePinnedToCoreWithCaps(rec_task, "rec", 6 * 1024, NULL, 6, &s_rec_task, 1,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        xTaskCreatePinnedToCore(rec_task, "rec", 6 * 1024, NULL, 6, &s_rec_task, 1);
+    }
     /* the MP3 decoder needs ~16 KB of stack scratch: put this task's stack in PSRAM */
     if (xTaskCreatePinnedToCoreWithCaps(play_task, "play", 32 * 1024, NULL, 6, NULL, 1,
                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         ESP_LOGE(TAG, "Could not start the playback task");
         return ESP_FAIL;
     }
-    xTaskCreatePinnedToCore(ctl_task, "voice_ctl", 6 * 1024, NULL, 5, NULL, 0);
+    if (xTaskCreatePinnedToCoreWithCaps(ctl_task, "voice_ctl", 6 * 1024, NULL, 5, NULL, 0,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        xTaskCreatePinnedToCore(ctl_task, "voice_ctl", 6 * 1024, NULL, 5, NULL, 0);
+    }
+    /* the wake word engine; its stack is in PSRAM to save internal RAM for the display */
+    if (s_wn_name &&
+        xTaskCreatePinnedToCoreWithCaps(wake_task, "wake", 16 * 1024, NULL, 5, &s_wake_task, 1,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        ESP_LOGE(TAG, "Could not start the wake word task: hold to talk only");
+        s_wn_name = NULL;
+    }
     s_audio_ok = true;
     return ESP_OK;
 }

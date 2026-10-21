@@ -17,6 +17,13 @@
 #ifndef WS_PORT
 #define WS_PORT 443
 #endif
+/* Stocks app (added later: an older secrets.h without these still builds) */
+#ifndef STOCKS_MCP_URL
+#define STOCKS_MCP_URL ""
+#endif
+#ifndef STOCKS_MCP_API_KEY
+#define STOCKS_MCP_API_KEY ""
+#endif
 #define XSTR(x) STR(x)
 #define STR(x)  #x
 
@@ -27,6 +34,7 @@ static SemaphoreHandle_t s_mtx;
 
 const char *settings_default_url(void) { return s_default_url; }
 const char *settings_build_host(void)  { return WS_HOST; }
+const char *settings_default_mcp_url(void) { return STOCKS_MCP_URL; }
 
 static void make_uuid(char *out /* SET_CONV_LEN + 1 bytes */)
 {
@@ -49,6 +57,9 @@ static void load_defaults(app_settings_t *s)
     s->dark_mode  = DEFAULT_DARK_MODE;
     s->brightness = DEFAULT_BRIGHTNESS;
     s->volume     = DEFAULT_VOLUME;
+    strlcpy(s->mcp_url, STOCKS_MCP_URL, sizeof(s->mcp_url));
+    strlcpy(s->mcp_api_key, STOCKS_MCP_API_KEY, sizeof(s->mcp_api_key));
+    s->stocks_auto = DEFAULT_STOCKS_AUTO;
 }
 
 static void get_str(nvs_handle_t h, const char *key, char *dst, size_t cap)
@@ -80,6 +91,7 @@ void settings_init(void)
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
         uint8_t dark = s_cur.dark_mode;
+        uint8_t stk_auto = s_cur.stocks_auto;
         get_str(h, "ssid",   s_cur.wifi_ssid,  sizeof(s_cur.wifi_ssid));
         get_str(h, "pass",   s_cur.wifi_pass,  sizeof(s_cur.wifi_pass));
         get_str(h, "url",    s_cur.ws_url,     sizeof(s_cur.ws_url));
@@ -88,7 +100,11 @@ void settings_init(void)
         get_u8(h, "dark",   &dark);
         get_u8(h, "bright", &s_cur.brightness);
         get_u8(h, "vol",    &s_cur.volume);
+        get_str(h, "mcpurl", s_cur.mcp_url,     sizeof(s_cur.mcp_url));
+        get_str(h, "mcpkey", s_cur.mcp_api_key, sizeof(s_cur.mcp_api_key));
+        get_u8(h, "stkauto", &stk_auto);
         s_cur.dark_mode = dark != 0;
+        s_cur.stocks_auto = stk_auto != 0;
         nvs_close(h);
         ESP_LOGI(TAG, "Loaded saved settings");
     } else {
@@ -147,6 +163,9 @@ esp_err_t settings_set(const app_settings_t *in)
     if (old.dark_mode != in->dark_mode)         err |= nvs_set_u8(h, "dark", in->dark_mode ? 1 : 0);
     if (old.brightness != in->brightness)       err |= nvs_set_u8(h, "bright", in->brightness);
     if (old.volume != in->volume)               err |= nvs_set_u8(h, "vol", in->volume);
+    if (strcmp(old.mcp_url, in->mcp_url))       err |= nvs_set_str(h, "mcpurl", in->mcp_url);
+    if (strcmp(old.mcp_api_key, in->mcp_api_key)) err |= nvs_set_str(h, "mcpkey", in->mcp_api_key);
+    if (old.stocks_auto != in->stocks_auto)     err |= nvs_set_u8(h, "stkauto", in->stocks_auto ? 1 : 0);
     err |= nvs_commit(h);
     nvs_close(h);
 

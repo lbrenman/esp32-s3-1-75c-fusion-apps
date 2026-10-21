@@ -1,12 +1,14 @@
 /* Home screen: clock, app launcher, Wi-Fi status and a day/night toggle. */
 
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 #include "apps.h"
 #include "ui_widgets.h"
 #include "net.h"
 #include "settings_store.h"
 #include "app_config.h"
+#include "text_ascii.h"
 
 static lv_obj_t   *s_scr;
 static lv_obj_t   *s_time;
@@ -51,7 +53,11 @@ static void update_wifi(void)
     case NET_UP:
         settings_get(&cfg);
         lv_obj_set_style_text_color(s_wifi_icon, ui_pal.ok, 0);
-        lv_label_set_text(s_wifi_text, cfg.wifi_ssid);
+        {
+            char name[3 * SET_SSID_MAX + 1];     /* "Leor's iPhone" uses ’, which the font lacks */
+            text_to_ascii(cfg.wifi_ssid, name, sizeof(name));
+            if (strcmp(lv_label_get_text(s_wifi_text), name) != 0) lv_label_set_text(s_wifi_text, name);
+        }
         break;
     case NET_CONNECTING:
         lv_obj_set_style_text_color(s_wifi_icon, ui_pal.warn, 0);
@@ -99,20 +105,20 @@ static lv_obj_t *tile(lv_obj_t *parent, const ui_app_t *app)
 {
     lv_obj_t *t = lv_obj_create(parent);
     lv_obj_remove_style_all(t);
-    lv_obj_set_size(t, 120, LV_SIZE_CONTENT);
+    lv_obj_set_size(t, 110, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(t, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(t, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(t, 10, 0);
     lv_obj_add_flag(t, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(t, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *orb = ui_orb(t, 108, app->color1, app->color2, app->icon, &ui_icons_56);
+    lv_obj_t *orb = ui_orb(t, 96, app->color1, app->color2, app->icon, &ui_icons_56);
     lv_obj_remove_flag(orb, LV_OBJ_FLAG_CLICKABLE);
     /* press feedback on the orb while the whole tile takes the touch */
     lv_obj_add_flag(orb, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_style_transform_scale(t, 240, LV_STATE_PRESSED);
-    lv_obj_set_style_transform_pivot_x(t, 60, 0);
-    lv_obj_set_style_transform_pivot_y(t, 64, 0);
+    lv_obj_set_style_transform_pivot_x(t, 55, 0);
+    lv_obj_set_style_transform_pivot_y(t, 58, 0);
 
     ui_label(t, &lv_font_montserrat_16, ui_pal.text, app->name);
     lv_obj_add_event_cb(t, tile_cb, LV_EVENT_CLICKED, (void *)app);
@@ -140,14 +146,14 @@ lv_obj_t *home_build(void *arg)
     s_ampm = ui_label(clock, &lv_font_montserrat_16, ui_pal.text_dim, "");
     lv_obj_set_style_pad_bottom(s_ampm, 8, 0);
 
-    /* app grid (wraps to more rows as apps are added; scrolls if it overflows) */
+    /* app grid: three tiles per row; wraps to more rows as apps are added and scrolls if it overflows */
     lv_obj_t *grid = lv_obj_create(scr);
     lv_obj_remove_style_all(grid);
     lv_obj_set_size(grid, 380, 170);
     lv_obj_align(grid, LV_ALIGN_CENTER, 0, 18);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(grid, 22, 0);
+    lv_obj_set_style_pad_column(grid, 14, 0);
     lv_obj_set_style_pad_row(grid, 16, 0);
     lv_obj_set_scrollbar_mode(grid, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(grid, LV_DIR_VER);
@@ -158,7 +164,7 @@ lv_obj_t *home_build(void *arg)
     lv_obj_remove_style_all(pill);
     lv_obj_remove_flag(pill, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(pill, LV_SIZE_CONTENT, 34);
-    lv_obj_set_style_max_width(pill, 240, 0);
+    lv_obj_set_style_max_width(pill, 300, 0);
     lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(pill, ui_pal.card, 0);
     lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
@@ -169,7 +175,10 @@ lv_obj_t *home_build(void *arg)
     lv_obj_align(pill, LV_ALIGN_BOTTOM_MID, 0, -96);
     s_wifi_icon = ui_icon(pill, &ui_icons_16, ui_pal.text_dim, ICON_WIFI);
     s_wifi_text = ui_label(pill, &lv_font_montserrat_14, ui_pal.text, "");
-    lv_obj_set_style_max_width(s_wifi_text, 180, 0);
+    /* one line, "..." if the network name is too long (without a fixed height it would wrap
+     * to a second line and spill out of the pill) */
+    lv_obj_set_style_max_width(s_wifi_text, 240, 0);
+    lv_obj_set_height(s_wifi_text, lv_font_get_line_height(&lv_font_montserrat_14));
     lv_label_set_long_mode(s_wifi_text, LV_LABEL_LONG_MODE_DOTS);
 
     /* day/night toggle: shows the mode it switches to */

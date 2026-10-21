@@ -22,6 +22,9 @@ typedef struct {
     uint8_t brightness;                   /* 5-100 % */
     uint8_t volume;                       /* 0-100 % */
     char    conversation_id[SET_CONV_LEN + 1];  /* sent with every voice turn; kept until "New conversation" */
+    char    mcp_url[SET_URL_MAX + 1];     /* Stocks: https://host:port/FusionStockWatchListMCP */
+    char    mcp_api_key[SET_KEY_MAX + 1];
+    bool    stocks_auto;                  /* Stocks: refresh quotes automatically */
 } app_settings_t;
 
 /* Initializes NVS and loads the settings. Call once, first thing in app_main. */
@@ -41,6 +44,9 @@ esp_err_t settings_new_conversation(char *out, size_t out_len);
 
 /* The server URL built from WS_HOST / WS_PORT / WS_PATH in secrets.h. */
 const char *settings_default_url(void);
+
+/* The Stocks MCP server URL from secrets.h (STOCKS_MCP_URL). */
+const char *settings_default_mcp_url(void);
 
 /* The WS_HOST from secrets.h (the host main/server_ca.pem was fetched from). */
 const char *settings_build_host(void);

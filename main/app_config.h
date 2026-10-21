@@ -35,3 +35,16 @@
 #define DEFAULT_DARK_MODE   1
 #define DEFAULT_BRIGHTNESS  80       /* % */
 #define DEFAULT_VOLUME      75       /* % */
+
+/* Stocks app: client for the FusionStockWatchListMCP server (Amplify Fusion MCP over HTTPS).
+ * The server URL and API key are in secrets.h (first boot) and on the device (gear button). */
+#define STOCKS_REFRESH_MS    (60 * 1000)   /* auto refresh while the app is open */
+#define STOCKS_RETRY_MS      (15 * 1000)   /* after a failed refresh */
+#define STOCKS_KEY_HEADER    "x-api-key"   /* HTTP header that carries the API key */
+#define STOCKS_TOOL_QUOTES   "GetStockWatchList"
+#define STOCKS_TOOL_LIST     "GetStockWatchListSymbols"
+#define STOCKS_TOOL_ADD      "AddSymbolToStockWatchList"
+#define STOCKS_TOOL_REMOVE   "RemoveSymbolFromStockWatchList"
+#define STOCKS_SYMBOL_ARG    "symbol"      /* argument name of the add/remove tools */
+#define DEFAULT_STOCKS_AUTO  1             /* auto refresh on at first boot */
+#define MCP_DEBUG            0             /* 1 = log the first 300 bytes of every MCP reply (tag "mcp") */

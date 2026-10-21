@@ -1,17 +1,22 @@
 # esp32-s3-1-75c-fusion-apps — App launcher for the ESP32-S3-Touch-AMOLED-1.75C
 
 A small "watch OS" for the Waveshare **ESP32-S3-Touch-AMOLED-1.75C**: a home screen with a clock and
-app icons, a **Voice chat** app (push-to-talk client for the Amplify Fusion WebSocket voice server)
-and a **Settings** app. Day and night themes, Font Awesome icons, slide transitions.
+app icons, a **Voice chat** app (push-to-talk client for the Amplify Fusion WebSocket voice server),
+a **Stocks** app (watchlist client for the FusionStockWatchListMCP server, an Amplify Fusion MCP
+server) and a **Settings** app. Day and night themes, Font Awesome icons, slide transitions.
 
 ![Screens](docs/screenshots/overview.png)
 
 *Screenshots are rendered by `tools/ui_preview` from the real UI code (see below), not photos of
 the device.*
 
-> **First draft.** The UI code is compiled and exercised on a PC against LVGL 9.5, and the
-> ESP-IDF side is syntax-checked, but this version has not been built with `idf.py` or run on a
-> board yet. Expect a small fix or two on the first build.
+![Stocks](docs/screenshots/stocks.png)
+
+> **Stocks is new and untested on the board.** Its screens are compiled and clicked through on a
+> PC against LVGL 9.5 (`tools/ui_preview`), its reply parsing and MCP message handling pass host
+> tests (`tools/stocks_test`), and the ESP-IDF code is syntax-checked against the IDF 5.5.2
+> headers, but it hasn't been built with `idf.py` or talked to the real server yet.
+> Expect a small fix or two on the first build.
 
 ---
 
@@ -22,6 +27,9 @@ the device.*
 | **Home** | Date and time (from NTP), app icons, Wi-Fi status, day/night button |
 | **Voice chat** | Hold to talk, release to send. Shows what the server heard and its reply, plays the reply audio |
 | **Voice server** (swipe up/down in Voice chat) | See and change the server URL and API key, connect/disconnect switch with status, reset URL to `secrets.h` |
+| **Stocks** | Your watchlist: symbol, company, price, change and % change, colored green or red. Refreshes every minute while open; the ↻ / ❚❚ button pauses and resumes auto refresh |
+| **Pick symbols** (+ or swipe left in Stocks) | Tabs of preset symbols (**QQQ 1**, **QQQ 2**, **Blue Chip**) and **Other** (watchlist symbols not on a tab, e.g. added from Claude). Tap to add (green) or remove (gray) |
+| **Stock server** (gear in Stocks) | See and change the MCP server URL and API key, connection status, refresh now, reset URL to `secrets.h` |
 | **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new), restart, reset |
 
 ### Gestures
@@ -33,6 +41,11 @@ the device.*
 | Voice chat | Swipe up / down | Voice server settings |
 | Voice chat, Voice server | Swipe left / right | Back to Home |
 | Voice server | Swipe up / down, or the ⌄ button | Back to Voice chat |
+| Stocks | Swipe left, or the + button | Pick symbols |
+| Stocks | Swipe right, or the ‹ button | Back to Home |
+| Stocks | Long-press a row | Remove that symbol (asks first) |
+| Pick symbols | Tap a symbol | Add or remove it (orange while it's being saved) |
+| Pick symbols, Stock server | Swipe right, or the ‹ button | Back to Stocks |
 | Settings and its screens | Swipe right, or the ‹ button | Back |
 
 Recording starts the moment your finger lands, so your first word isn't cut off. If the finger
@@ -63,6 +76,55 @@ which matters on mesh networks and with extenders. The log shows which one:
 `net: Wi-Fi connected, IP ..., AP xx:xx:..., channel N, -NN dBm`. The choice is made when Wi-Fi
 connects; the board doesn't switch access points while it stays connected.
 
+### The Stocks app
+
+Stocks is an MCP client: it calls the tools of your
+[FusionStockWatchListMCP](https://github.com/lbrenman/Amplify-Fusion-Stock-Watch-List-MCP) server, the
+same server the [StackChan watchlist](https://github.com/lbrenman/m5-stockchan-stock-watchlist-mcp-client)
+uses, so both devices (and Claude) share one watchlist.
+
+| When | What happens |
+| --- | --- |
+| Stocks opens | Connects (`initialize`), then loads the symbol list and the quotes |
+| While open, auto refresh on | Symbols + quotes every 60 s (`STOCKS_REFRESH_MS`); after a failure, a retry every 15 s |
+| Auto refresh off (❚❚) | No timed refreshes. The quotes stay on screen and the status line shows how old they are. Turning it back on refreshes right away. The choice is saved on the device |
+| Tap symbols on Pick | Each tap is queued and sent in order, one request at a time; the button is orange until the server answers. Then the list and quotes reload once |
+| Back to Home | Finishes any queued adds/removes, then closes the connection |
+
+All requests run in the Stocks engine's own task (`stocks_core.c`), so the screen never freezes
+while one is running, unlike the StackChan version. Requests close together (the first load, a
+refresh) share one TLS connection; after 30 s idle the next request opens a new one.
+
+Status line on the watchlist:
+
+| Status | Meaning |
+| --- | --- |
+| Updated 4:41 PM | Last successful refresh (shows "Updated 12s ago" until the clock is set) |
+| Updating... | A refresh is running |
+| Paused • updated 4m ago (amber) | Auto refresh is off |
+| *message* • 3m ago (red) | The last refresh failed; the quotes on screen are from 3 minutes ago |
+| Set the server URL (gear button) | No URL yet, or still the `secrets.h.example` placeholder |
+
+How Stocks uses the server's tools (names and the argument name are in `app_config.h`):
+
+| Tool | Used for | Reply the app expects |
+| --- | --- | --- |
+| `GetStockWatchListSymbols` | The symbol list (also shows tickers the server can't quote as "no quote" rows) | `AAPL,INTC,TXN` |
+| `GetStockWatchList` | Quotes | `{"Watchlist":[{"Symbol":"AAPL","Name":"Apple Inc","Price":341.07,"Change":5.15,"ChangePercent":1.5331}]}` |
+| `AddSymbolToStockWatchList` | Add, `{"symbol":"AAPL"}` | `Symbol AAPL successfully added` / `Symbol already exists` |
+| `RemoveSymbolFromStockWatchList` | Remove, `{"symbol":"AAPL"}` | `Successfully removed AAPL ...` / `Error deleting ...` |
+
+`RemoveAllSymbolsFromStockWatchList` and `GetStockQuote` are never called. The server always answers
+`isError: false`, so, as on the StackChan, the add/remove result comes from the message text, and
+"Error deleting" is read as "it wasn't in the list". Other reply shapes (plain JSON arrays, other key
+names, numbers as strings, JSON encoded twice) are accepted too; see `main/apps/stocks_parse.c`.
+
+The MCP client (`main/mcp_client.c`) speaks Streamable HTTP: one HTTPS `POST` per JSON-RPC message
+with `x-api-key`, `Mcp-Session-Id` (from `initialize`) and `MCP-Protocol-Version` headers. It reads
+both plain-JSON and SSE (`data: {...}`) replies. A network error, a 5xx, or an expired session (404)
+is retried once with a new connection and, if needed, a new session; a reply from the server (an
+RPC error or a tool error) is not retried.
+
 ### Voice chat ring colors
 
 | Ring | Status | Meaning |
@@ -81,7 +143,18 @@ connects; the board doesn't switch access points while it stays connected.
 
 `main/secrets.h` holds your Wi-Fi and server values, as before. On first boot the device copies
 them into its settings. Anything you change on the device (Wi-Fi in Settings, URL and API key in
-Voice chat) is saved in the device's flash (NVS) and survives reboots and re-flashing.
+Voice chat or Stocks, the Stocks auto-refresh switch) is saved in the device's flash (NVS) and
+survives reboots and re-flashing.
+
+The Stocks server comes from two lines you add to `main/secrets.h` (see `main/secrets.h.example`):
+
+```c
+#define STOCKS_MCP_URL      "https://your-fusion-host:4443/FusionStockWatchListMCP"
+#define STOCKS_MCP_API_KEY  "your-mcp-api-key"
+```
+
+An older `secrets.h` without them still builds; Stocks then asks you to set the URL with the gear
+button. Values already saved on the device win over `secrets.h` until **Settings > Reset settings**.
 
 - **Settings > Reset settings** goes back to the `secrets.h` values.
 - `idf.py erase-flash` also clears them.
@@ -97,10 +170,12 @@ esp32-s3-1-75c-fusion-apps/
 ├── sdkconfig.fusion_apps          just this project's settings, for reference
 ├── components/bsp_extra/          Waveshare's audio helper (codec, I2S, speaker amp)
 ├── main/
-│   ├── app_main.c                 boot: settings -> display/UI -> audio -> Wi-Fi
+│   ├── app_main.c                 boot: settings -> display/UI -> audio -> stocks engine -> Wi-Fi
 │   ├── app_config.h               compiled-in options: time zone, 12/24 h clock, animation time...
 │   ├── settings_store.c/.h        settings in NVS, defaults from secrets.h
 │   ├── net.c/.h                   Wi-Fi station, scanning, NTP clock
+│   ├── mcp_client.c/.h            small MCP client: Streamable HTTP, sessions, SSE replies
+│   ├── text_ascii.c/.h            turns ’ “ ” – é ... into ASCII the built-in fonts can draw
 │   ├── secrets.h.example          copy to secrets.h (gitignored)
 │   ├── minimp3.h, minimp3_impl.c  MP3 decoder (CC0)
 │   ├── ui/
@@ -113,15 +188,19 @@ esp32-s3-1-75c-fusion-apps/
 │       ├── app_home.c             Home screen
 │       ├── app_settings.c         Settings app (+ Wi-Fi scan screen)
 │       ├── app_voice.c            Voice chat screen + Voice server screen
-│       └── voice_core.c, voice.h  recording, WebSocket, playback (no LVGL in here)
+│       ├── voice_core.c, voice.h  recording, WebSocket, playback (no LVGL in here)
+│       ├── app_stocks.c           Stocks: Watchlist, Pick symbols and Stock server screens
+│       ├── stocks_core.c, stocks.h   the Stocks engine task: tool calls, queue, refresh timer (no LVGL)
+│       └── stocks_parse.c/.h      parses the watchlist server's replies (pure C, host-tested)
 ├── tools/
 │   ├── make_icon_font.py          regenerates main/ui/ui_icons*.c
-│   └── ui_preview/                runs the UI on your Mac and saves screenshots
+│   ├── ui_preview/                runs the UI on your Mac and saves screenshots
+│   └── stocks_test/               host tests for the Stocks reply parsing and MCP reply handling
 ├── assets/                        Font Awesome Free TTF + license (input for make_icon_font.py)
 └── docs/screenshots/
 ```
 
-All LVGL work happens in the LVGL task. The voice engine, Wi-Fi and settings never touch LVGL
+All LVGL work happens in the LVGL task. The voice and stocks engines, Wi-Fi and settings never touch LVGL
 objects; the screens read their state from LVGL timers. That keeps tasks from drawing on screens
 that have already been closed.
 
@@ -178,6 +257,11 @@ new host in `secrets.h` and refresh the certificate:
 rm main/server_ca.pem && idf.py reconfigure && idf.py build flash
 ```
 
+Stocks follows the same rule: if the host in its server URL is `WS_HOST` (your Fusion sandbox
+usually serves both on port 4443), it uses `server_ca.pem`; any other host is checked against the
+built-in CA bundle (the `mcp` log line says which). Unlike the StackChan version, the certificate
+is always verified.
+
 ## Adding an app
 
 1. Create `main/apps/app_<name>.c` with a build function that returns a screen, and a descriptor:
@@ -232,6 +316,17 @@ open shots/contact_sheet.png
 ```
 
 Change the fake values in `stubs.c` or the click-through script in `sim.c` to preview other states.
+The Stocks screens use a fake watchlist (`stocks_fake_load()` in `stubs.c`); shots `40_` to `59_`.
+
+## Test the Stocks parsing on your Mac
+
+`tools/stocks_test` runs the Stocks reply parsers and the MCP client's reply handling (SSE and
+plain JSON, request ids, text content) against the server's real replies and other shapes:
+
+```bash
+cd tools/stocks_test
+make                      # first run clones cJSON; prints "N checks, 0 failed"
+```
 
 ## Settings you might change
 
@@ -244,6 +339,11 @@ Change the fake values in `stubs.c` or the click-through script in `sim.c` to pr
 | `app_config.h` | `VOICE_IDLE_DISCONNECT_MS` | 3 min; 0 = never |
 | `app_config.h` | `DEFAULT_DARK_MODE`, `DEFAULT_BRIGHTNESS`, `DEFAULT_VOLUME` | dark, 80 %, 75 % (first boot) |
 | `apps/voice_core.c` | `REC_MAX_SECONDS`, `TURN_TIMEOUT_US`, `RX_MAX_BYTES` | 10 s, 45 s, 3 MB |
+| `app_config.h` | `STOCKS_REFRESH_MS`, `STOCKS_RETRY_MS` | 60 s, 15 s |
+| `app_config.h` | `STOCKS_TOOL_*`, `STOCKS_SYMBOL_ARG`, `STOCKS_KEY_HEADER` | FusionStockWatchListMCP names, `symbol`, `x-api-key` |
+| `app_config.h` | `DEFAULT_STOCKS_AUTO` | 1 (auto refresh on, first boot) |
+| `app_config.h` | `MCP_DEBUG` | 0; 1 logs the first 300 bytes of each MCP reply |
+| `apps/app_stocks.c` | `GROUPS` (Pick tabs, up to 25 symbols each) | QQQ 1, QQQ 2, Blue Chip |
 | `ui/ui_theme.c` | palette colors | |
 
 ## Protocol
@@ -304,8 +404,8 @@ rm sdkconfig && idf.py -p /dev/cu.usbmodem1101 build flash monitor
 
 ## Troubleshooting
 
-Read the serial log first (`idf.py -p /dev/cu.usbmodem101 monitor`). Tags: `app`, `settings`,
-`net`, `voice`.
+Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app`, `settings`,
+`net`, `voice`, `stocks`, `mcp`.
 
 | Symptom / log | Likely cause | Fix |
 | --- | --- | --- |
@@ -323,3 +423,13 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem101 monitor`). Tags: `app`
 | Recorded 0 ms / no transcript | Mic not capturing | Confirm the board is the 1.75C |
 | `tx WAV ... result 0 ... (FAILED)` after ~15 s, then a reconnect | Wi-Fi link stalled (often a weak signal: check the dBm in the `net:` and `vdiag` lines) | The app resends automatically; move closer to the access point if it repeats |
 | Swipes start recordings, or holds count as swipes | Swipe thresholds | Adjust `UI_SWIPE_MIN_PX` / `UI_SWIPE_MAX_MS` |
+| Stocks: "Set the server URL (gear button)" | `STOCKS_MCP_URL` missing from `secrets.h`, or still the placeholder | Gear > Server URL, or add it to `secrets.h` and Reset settings |
+| Stocks: "HTTP 401 - check the API key" (or 403) | API key | Gear > API key |
+| Stocks: "HTTP 404 - check the server URL" | Wrong path (the endpoint is `/FusionStockWatchListMCP` on the server's port) | Gear > Server URL |
+| Stocks: "Can't reach the server" | Host/port, Wi-Fi, or TLS; `mcp:` log lines show which host and which certificate | Check the URL; for a host other than `WS_HOST`, see "TLS certificate" |
+| Stocks: "Tool operation not found for tool: ..." | A tool name in `app_config.h` doesn't exist on the server | Compare `STOCKS_TOOL_*` with the server's tools |
+| Stocks: "Bad reply from the server" or "Unrecognized quotes reply" | The reply format changed | Set `MCP_DEBUG 1`, rebuild, and look at the `mcp: reply:` line |
+| Stocks: a row says "no quote" | The server accepted a ticker its quote service doesn't know | Long-press the row, or remove it on the Other tab |
+| Pick: a button stays green after a remove | The server had the symbol twice and removed one copy | Tap it again |
+| Pick: "Still loading the watchlist..." | Taps wait until the symbol list has loaded once | Wait for the status line to show the count |
+| A name shows ' where the real one has ’ (e.g. an iPhone hotspot "Leor's iPhone") | The built-in fonts are ASCII-only, so Wi-Fi names, stock names and voice replies are shown with ASCII look-alikes | Nothing to fix: the real name is what's saved and joined |

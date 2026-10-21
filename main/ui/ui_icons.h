@@ -43,3 +43,9 @@ LV_FONT_DECLARE(ui_icons_56)
 #define ICON_WAVE       "\xEF\xA0\xBE"   /* U+F83E */
 #define ICON_HAND       "\xEF\x89\x96"   /* U+F256 */
 #define ICON_ROBOT      "\xEF\x95\x84"   /* U+F544 */
+#define ICON_CHART      "\xEF\x88\x81"   /* U+F201 */
+#define ICON_PLUS       "\x2B"   /* U+002B */
+#define ICON_PAUSE      "\xEF\x81\x8C"   /* U+F04C */
+#define ICON_PLAY       "\xEF\x81\x8B"   /* U+F04B */
+#define ICON_LIST       "\xEF\x80\xBA"   /* U+F03A */
+#define ICON_TRASH      "\xEF\x87\xB8"   /* U+F1F8 */

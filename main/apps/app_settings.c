@@ -11,7 +11,9 @@
 #include "net.h"
 #include "settings_store.h"
 #include "voice.h"
+#include "stocks.h"
 #include "app_config.h"
+#include "text_ascii.h"
 
 static lv_obj_t   *s_scr;
 static lv_obj_t   *s_list;
@@ -21,6 +23,17 @@ static lv_timer_t *s_timer;
 static int32_t     s_keep_scroll = -1;   /* restore the scroll position after a theme rebuild */
 
 /* ---------------------------------------------------------------- helpers */
+/* A Wi-Fi name as the font can show it ("Leor Brenman’s iPhone" -> "Leor Brenman's iPhone").
+ * Display only: the real name (bytes) is what gets saved and joined. */
+static const char *ssid_text(const char *ssid)
+{
+    static char buf[4][3 * SET_SSID_MAX + 1];
+    static int  next;
+    char *b = buf[next++ % 4];
+    text_to_ascii(ssid, b, sizeof(buf[0]));
+    return b;
+}
+
 static void status_text(char *buf, size_t len)
 {
     char ip[20];
@@ -47,7 +60,7 @@ static void refresh_rows(void)
     if (!s_scr) return;
     app_settings_t cfg;
     settings_get(&cfg);
-    lv_label_set_text(s_net_row.value, cfg.wifi_ssid[0] ? cfg.wifi_ssid : "Not set");
+    lv_label_set_text(s_net_row.value, cfg.wifi_ssid[0] ? ssid_text(cfg.wifi_ssid) : "Not set");
     char buf[64];
     status_text(buf, sizeof(buf));
     lv_label_set_text(s_status_row.value, buf);
@@ -75,7 +88,7 @@ static void apply_wifi(const char *ssid, const char *pass)
     settings_set(&cfg);
     net_reconnect();
     char msg[64];
-    snprintf(msg, sizeof(msg), "Connecting to %s", ssid);
+    snprintf(msg, sizeof(msg), "Connecting to %s", ssid_text(ssid));
     ui_toast(msg);
 }
 
@@ -94,7 +107,7 @@ static void open_password_editor(const char *ssid, bool replace, int pop_after)
     app_settings_t cfg;
     settings_get(&cfg);
     char title[64];
-    snprintf(title, sizeof(title), "%s", ssid);
+    snprintf(title, sizeof(title), "%s", ssid_text(ssid));
     ui_editor_cfg_t ed = {
         .title = title,
         .icon = ICON_LOCK,
@@ -161,7 +174,7 @@ static void scan_fill(const net_ap_t *aps, int n)
         bool current = strcmp(aps[i].ssid, cfg.wifi_ssid) == 0;
         snprintf(val, sizeof(val), "%s%s, %s", current ? "Current, " : "", aps[i].secure ? "Secured" : "Open", quality);
         uint32_t c = aps[i].rssi > -70 ? UI_C_BLUE : aps[i].rssi > -80 ? UI_C_ORANGE : UI_C_GRAY;
-        ui_row(s_scan_list, aps[i].secure ? ICON_LOCK : ICON_WIFI, c, aps[i].ssid, val, scan_pick_cb, (void *)&aps[i]);
+        ui_row(s_scan_list, aps[i].secure ? ICON_LOCK : ICON_WIFI, c, ssid_text(aps[i].ssid), val, scan_pick_cb, (void *)&aps[i]);
     }
     ui_section(s_scan_list, "OTHER");
     ui_row(s_scan_list, ICON_PEN, UI_C_GRAY, "Enter name", "Hidden or not listed", scan_manual_cb, NULL);
@@ -324,6 +337,8 @@ static void do_reset(void *user)
     voice_set_volume(cfg.volume);
     net_reconnect();
     voice_reconnect();
+    stocks_set_auto(cfg.stocks_auto);
+    stocks_config_changed();
     ui_theme_set_dark(cfg.dark_mode);
     s_keep_scroll = -1;
     ui_nav_refresh();
@@ -348,7 +363,7 @@ static lv_obj_t *settings_build(void *arg)
     s_list = list;
 
     ui_section(list, "WI-FI");
-    s_net_row = ui_row(list, ICON_WIFI, UI_C_BLUE, "Network", cfg.wifi_ssid, net_row_cb, NULL);
+    s_net_row = ui_row(list, ICON_WIFI, UI_C_BLUE, "Network", ssid_text(cfg.wifi_ssid), net_row_cb, NULL);
     char masked[48];
     ui_mask_secret(cfg.wifi_pass, masked, sizeof(masked), false);
     ui_row(list, ICON_KEY, UI_C_ORANGE, "Password", masked, pass_row_cb, NULL);

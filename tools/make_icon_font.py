@@ -24,6 +24,8 @@ ICONS = [
     ("COMMENT", 0xF4AD), ("WARN", 0xF071), ("POWER", 0xF011), ("RESET", 0xF0E2),
     ("PLUG", 0xF1E6), ("GLOBE", 0xF0AC), ("BRIGHT", 0xF0EB), ("PEN", 0xF304),
     ("SIGNAL", 0xF012), ("WAVE", 0xF83E), ("HAND", 0xF256), ("ROBOT", 0xF544),
+    ("CHART", 0xF201), ("PLUS", 0x2B), ("PAUSE", 0xF04C), ("PLAY", 0xF04B),
+    ("LIST", 0xF03A), ("TRASH", 0xF1F8),
 ]
 
 

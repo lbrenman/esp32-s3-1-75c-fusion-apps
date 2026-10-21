@@ -66,6 +66,7 @@ endif()
 idf_component_register(SRCS "app_main.c"
                             "settings_store.c"
                             "net.c"
+                            "text_ascii.c"
                             "minimp3_impl.c"
                             "ui/ui_theme.c"
                             "ui/ui_nav.c"
@@ -79,6 +80,10 @@ idf_component_register(SRCS "app_main.c"
                             "apps/app_settings.c"
                             "apps/app_voice.c"
                             "apps/voice_core.c"
+                            "apps/app_stocks.c"
+                            "apps/stocks_core.c"
+                            "apps/stocks_parse.c"
+                            "mcp_client.c"
                        INCLUDE_DIRS "." "ui" "apps"
                        EMBED_TXTFILES "server_ca.pem")
 

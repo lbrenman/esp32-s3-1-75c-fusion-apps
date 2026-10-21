@@ -10,6 +10,7 @@
 #include "apps.h"
 #include "voice.h"
 #include "net.h"
+#include "stocks.h"
 
 #define W 466
 extern int64_t g_sim_us;
@@ -18,6 +19,10 @@ extern char g_heard[], g_reply[], g_note[];
 extern uint32_t g_ver;
 extern bool g_vactive;
 extern net_state_t g_net;
+extern stocks_snapshot_t g_ss;
+void stocks_fake_load(int n);
+void stocks_fake_finish(void);
+void stocks_bump(void);
 
 static uint16_t fb[W * W];
 static uint8_t  drawbuf[W * W * 2];
@@ -229,5 +234,69 @@ int main(void)
     tap_text("Start new");
     step(300);
     shot("31_after_new_conversation");
+
+    /* ---- Stocks ---- */
+    swipe(120, 240, 360, 240);           /* Settings -> Home */
+    shot("40_home_three_apps");
+    g_ss.auto_refresh = true;
+    tap_text("Stocks");
+    shot("41_stocks_loading");
+    stocks_fake_load(7);
+    shot("42_stocks_watchlist");
+    swipe(233, 360, 233, 200);           /* scroll the list */
+    shot("43_stocks_scrolled");
+    swipe(233, 200, 233, 380);
+    tap(163, 410);                       /* auto refresh button -> paused */
+    step(2200);
+    shot("44_stocks_paused");
+    tap(163, 410);                       /* back on */
+    step(2200);
+    {   /* long-press the NVDA row */
+        lv_obj_t *l = find_text(lv_screen_active(), "NVDA");
+        lv_area_t a; lv_obj_get_coords(l, &a);
+        hold(a.x1 + 100, (a.y1 + a.y2) / 2); step(700); release();
+    }
+    shot("45_stocks_remove_confirm");
+    tap_text("Cancel");
+    swipe(360, 250, 110, 250);           /* swipe left -> Pick */
+    shot("46_pick_qqq1");
+    tap_text("NVDA");                    /* listed: remove */
+    tap_text("AMZN");                    /* not listed: add */
+    shot("47_pick_pending");
+    stocks_fake_finish();
+    step(300);
+    shot("48_pick_done");
+    step(2500);
+    tap_text("Other");
+    shot("49_pick_other");
+    tap_text("Blue Chip");
+    shot("50_pick_bluechip");
+    swipe(110, 250, 360, 250);           /* swipe right -> Watchlist */
+    step(2500);
+    shot("51_stocks_after_pick");
+    tap(303, 410);                       /* gear */
+    shot("52_stock_server");
+    tap_text("API key");
+    shot("53_stock_server_key_editor");
+    tap(233 - 130, 52);
+    step(400);
+    swipe(110, 250, 360, 250);
+    g_ss.state = STOCKS_ERROR; strcpy(g_ss.note, "Can't reach the server"); g_ss.updated_us = g_sim_us - 185000000LL;
+    stocks_bump();
+    shot("54_stocks_error_with_data");
+    g_ss.nrows = g_ss.nsyms = 0; g_ss.state = STOCKS_OK; g_ss.note[0] = 0; stocks_bump();
+    shot("55_stocks_empty");
+    g_ss.quotes_loaded = false; g_ss.state = STOCKS_NOT_SET; strcpy(g_ss.note, "Set the server URL (gear button)"); stocks_bump();
+    shot("56_stocks_not_set");
+    ui_theme_set_dark(false); ui_nav_refresh(); step(300);
+    stocks_fake_load(7);
+    shot("57_stocks_light");
+    swipe(360, 250, 110, 250);
+    tap_text("QQQ 1");
+    shot("58_pick_light");
+    swipe(110, 250, 360, 250);
+    swipe(110, 250, 360, 250);
+    printf("stocks active should be 0 now\n");
+    shot("59_home_light_three_apps");
     return 0;
 }

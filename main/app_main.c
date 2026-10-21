@@ -2,9 +2,10 @@
  * esp32-s3-1-75c-fusion-apps — a small app launcher for the Waveshare ESP32-S3-Touch-AMOLED-1.75C
  *
  *   Home screen ─┬─ Voice chat  (push-to-talk client for the Amplify Fusion voice server)
+ *                ├─ Stocks      (watchlist client for the FusionStockWatchListMCP server)
  *                └─ Settings    (Wi-Fi, dark mode, brightness, volume, reset)
  *
- * Boot order: settings (NVS) -> display + UI -> audio -> Wi-Fi.
+ * Boot order: settings (NVS) -> display + UI -> audio -> stocks engine -> Wi-Fi.
  * Apps live in main/apps/, shared UI pieces in main/ui/.
  */
 
@@ -19,6 +20,7 @@
 #include "settings_store.h"
 #include "net.h"
 #include "voice.h"
+#include "stocks.h"
 #include "apps.h"
 #include "ui_theme.h"
 #include "ui_nav.h"
@@ -50,6 +52,7 @@ void app_main(void)
         ESP_LOGE(TAG, "Audio init failed: Voice chat will show an error");
     }
     voice_set_volume(cfg.volume);
+    stocks_init();
 
     net_start();
 

@@ -2,6 +2,7 @@
  * esp32-s3-1-75c-fusion-apps — a small app launcher for the Waveshare ESP32-S3-Touch-AMOLED-1.75C
  *
  *   Home screen ─┬─ Voice chat  (push-to-talk client for the Amplify Fusion voice server)
+ *                ├─ Translator  (push-to-talk voice translator, same engine as Voice chat)
  *                ├─ Stocks      (watchlist client for the FusionStockWatchListMCP server)
  *                └─ Settings    (Wi-Fi, dark mode, brightness, volume, reset)
  *

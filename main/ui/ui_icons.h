@@ -55,3 +55,6 @@ LV_FONT_DECLARE(ui_icons_56)
 #define ICON_BATTERY_1Q "\xEF\x89\x83"   /* U+F243 */
 #define ICON_BATTERY_EMPTY "\xEF\x89\x84"   /* U+F244 */
 #define ICON_BOLT       "\xEF\x83\xA7"   /* U+F0E7 */
+#define ICON_LANGUAGE   "\xEF\x86\xAB"   /* U+F1AB */
+#define ICON_SWAP       "\xEF\x83\xAC"   /* U+F0EC */
+#define ICON_ARROW_RIGHT "\xEF\x81\xA1"   /* U+F061 */

@@ -74,3 +74,12 @@
 #define STOCKS_SYMBOL_ARG    "symbol"      /* argument name of the add/remove tools */
 #define DEFAULT_STOCKS_AUTO  1             /* auto refresh on at first boot */
 #define MCP_DEBUG            0             /* 1 = log the first 300 bytes of every MCP reply (tag "mcp") */
+
+/* Translator app: push-to-talk client for the Amplify Fusion voice translator (WebSocket).
+ * The server base URL and API key are in secrets.h (first boot) and on the device (swipe up);
+ * the app connects to <base>/translate?sourceLanguage=..&targetLanguage=..&x-api-key=..
+ * The languages are picked on the device (tap the language bar) and saved. */
+#define DEFAULT_TR_SOURCE      "en"          /* first boot; secrets.h TRANSLATE_SOURCE_LANG overrides */
+#define DEFAULT_TR_TARGET      "es"
+#define TR_PATH                "/translate"  /* added to the base URL */
+#define TR_AUDIO_WAIT_MS       15000         /* TRANSLATION announced audio: give up waiting after this */

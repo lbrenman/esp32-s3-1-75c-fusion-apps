@@ -1,4 +1,8 @@
-/* Home screen: clock, app launcher, Wi-Fi status and a day/night toggle. */
+/* Home screen: clock, app carousel, Wi-Fi status and a day/night toggle.
+ *
+ * The apps sit in a row you swipe left and right, one app at a time, like a watch: the app in the
+ * middle is full size, its neighbors smaller and dimmer. Tap an app to open it. Home remembers
+ * which app was in the middle (the one you last opened), so going back lands on it. */
 
 #include <stdio.h>
 #include <string.h>
@@ -10,6 +14,20 @@
 #include "app_config.h"
 #include "text_ascii.h"
 #include "power.h"
+
+/* Carousel geometry */
+#define HOME_TILE_W      120      /* tile width (orb + name) */
+#define HOME_ORB         104      /* orb size of the tile in the middle */
+#define HOME_TILE_GAP    10
+#define HOME_TILE_STEP   (HOME_TILE_W + HOME_TILE_GAP)
+#define HOME_SIDE_ORB    80       /* orb size of the neighbors (the 56 px icon still fits)... */
+#define HOME_SIDE_OPA    140      /* ...and how dim they are (255 = not at all) */
+#define HOME_FAR_ORB     60       /* two away: smaller still, and faded out */
+#define HOME_TILE_H      150      /* orb area (HOME_ORB) + name */
+
+static int       s_center_app = 0;      /* the app in the middle of the carousel; kept across rebuilds */
+static lv_obj_t  *s_carousel;
+static lv_obj_t  *s_dots[8];
 
 static lv_obj_t   *s_scr;
 static lv_obj_t   *s_time;
@@ -140,12 +158,74 @@ static void delete_cb(lv_event_t *e)
     if (s_timer) lv_timer_delete(s_timer);
     s_timer = NULL;
     s_scr = NULL;
+    s_carousel = NULL;
+    memset(s_dots, 0, sizeof(s_dots));
 }
 
 static void tile_cb(lv_event_t *e)
 {
     if (ui_nav_busy()) return;
-    ui_nav_open_app((const ui_app_t *)lv_event_get_user_data(e));
+    const ui_app_t *app = (const ui_app_t *)lv_event_get_user_data(e);
+    for (int i = 0; i < g_app_count; i++) if (g_apps[i] == app) s_center_app = i;
+    ui_nav_open_app(app);
+}
+
+/* Size and dim each tile's orb by its distance from the middle; light the matching page dot.
+ * This runs on every scroll step, so it changes only plain properties (size, opacity). A transform
+ * (scale) or a whole-object opacity would make LVGL draw each tile into an off-screen layer and
+ * resample it on every frame, which is what made the first version jerky on the ESP32-S3. */
+static void carousel_update(void)
+{
+    if (!s_carousel) return;
+    lv_area_t c;
+    lv_obj_get_coords(s_carousel, &c);
+    int32_t mid = (c.x1 + c.x2) / 2;
+    int32_t best = INT32_MAX;
+    int center = s_center_app;
+    for (int i = 0; i < g_app_count && i < (int)lv_obj_get_child_count(s_carousel); i++) {
+        lv_obj_t *t = lv_obj_get_child(s_carousel, i);
+        lv_area_t a;
+        lv_obj_get_coords(t, &a);
+        int32_t d = LV_ABS((a.x1 + a.x2) / 2 - mid);
+        if (d < best) { best = d; center = i; }
+        int32_t size, o;
+        if (d <= HOME_TILE_STEP) {          /* middle -> neighbor: shrink and dim a little */
+            size = HOME_ORB - d * (HOME_ORB - HOME_SIDE_ORB) / HOME_TILE_STEP;
+            o = 255 - d * (255 - HOME_SIDE_OPA) / HOME_TILE_STEP;
+        } else {                            /* neighbor -> two away: shrink more and fade out (off the edge) */
+            int32_t e = d - HOME_TILE_STEP;
+            if (e > HOME_TILE_STEP) e = HOME_TILE_STEP;
+            size = HOME_SIDE_ORB - e * (HOME_SIDE_ORB - HOME_FAR_ORB) / HOME_TILE_STEP;
+            o = HOME_SIDE_OPA - e * HOME_SIDE_OPA / HOME_TILE_STEP;
+        }
+        size &= ~1;                                                        /* even: stays centered */
+        lv_opa_t opa = (lv_opa_t)o;
+        lv_obj_t *orb = lv_obj_get_child(t, 0);
+        lv_obj_t *icon = lv_obj_get_child(orb, 0);
+        lv_obj_t *name = lv_obj_get_child(t, 1);
+        if (lv_obj_get_width(orb) != size) {                               /* only redraw what changed */
+            lv_obj_set_size(orb, size, size);
+            lv_obj_set_style_transform_pivot_x(orb, size / 2, 0);
+            lv_obj_set_style_transform_pivot_y(orb, size / 2, 0);
+        }
+        if (lv_obj_get_style_bg_opa(orb, 0) != opa) {
+            lv_obj_set_style_bg_opa(orb, opa, 0);
+            if (icon) lv_obj_set_style_text_opa(icon, opa, 0);
+            lv_obj_set_style_text_opa(name, opa, 0);
+        }
+    }
+    s_center_app = center;
+    for (int i = 0; i < g_app_count && i < (int)(sizeof(s_dots) / sizeof(s_dots[0])); i++) {
+        if (!s_dots[i]) continue;
+        lv_obj_set_style_bg_color(s_dots[i], i == center ? ui_pal.text : ui_pal.text_dim, 0);
+        lv_obj_set_style_bg_opa(s_dots[i], i == center ? LV_OPA_COVER : LV_OPA_50, 0);
+        lv_obj_set_width(s_dots[i], i == center ? 18 : 7);
+    }
+}
+
+static void carousel_scroll_cb(lv_event_t *e)
+{
+    carousel_update();
 }
 
 static void theme_cb(lv_event_t *e)
@@ -159,26 +239,25 @@ static void theme_cb(lv_event_t *e)
     ui_nav_refresh();
 }
 
-static lv_obj_t *tile(lv_obj_t *parent, const ui_app_t *app)
+static lv_obj_t *tile(lv_obj_t *parent, const ui_app_t *app, int w, int orb_size)
 {
+    /* fixed size, no flex: the carousel resizes the orb while scrolling, and that must not move
+     * anything else (the orb stays centered on the same point, the name stays put) */
     lv_obj_t *t = lv_obj_create(parent);
     lv_obj_remove_style_all(t);
-    lv_obj_set_size(t, 110, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(t, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(t, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(t, 10, 0);
+    lv_obj_set_size(t, w, HOME_TILE_H);
     lv_obj_add_flag(t, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(t, LV_OBJ_FLAG_SNAPPABLE);
     lv_obj_remove_flag(t, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *orb = ui_orb(t, 96, app->color1, app->color2, app->icon, &ui_icons_56);
+    lv_obj_t *orb = ui_orb(t, orb_size, app->color1, app->color2, app->icon, &ui_icons_56);
     lv_obj_remove_flag(orb, LV_OBJ_FLAG_CLICKABLE);
     /* press feedback on the orb while the whole tile takes the touch */
     lv_obj_add_flag(orb, LV_OBJ_FLAG_EVENT_BUBBLE);
-    lv_obj_set_style_transform_scale(t, 240, LV_STATE_PRESSED);
-    lv_obj_set_style_transform_pivot_x(t, 55, 0);
-    lv_obj_set_style_transform_pivot_y(t, 58, 0);
+    lv_obj_align(orb, LV_ALIGN_CENTER, 0, orb_size / 2 - HOME_TILE_H / 2);   /* center at y = orb_size / 2 */
 
-    ui_label(t, &lv_font_montserrat_16, ui_pal.text, app->name);
+    lv_obj_t *name = ui_label(t, &lv_font_montserrat_16, ui_pal.text, app->name);
+    lv_obj_align(name, LV_ALIGN_BOTTOM_MID, 0, -4);
     lv_obj_add_event_cb(t, tile_cb, LV_EVENT_CLICKED, (void *)app);
     return t;
 }
@@ -217,18 +296,50 @@ lv_obj_t *home_build(void *arg)
     s_ampm = ui_label(clock, &lv_font_montserrat_16, ui_pal.text_dim, "");
     lv_obj_set_style_pad_bottom(s_ampm, 8, 0);
 
-    /* app grid: three tiles per row; wraps to more rows as apps are added and scrolls if it overflows */
-    lv_obj_t *grid = lv_obj_create(scr);
-    lv_obj_remove_style_all(grid);
-    lv_obj_set_size(grid, 380, 170);
-    lv_obj_align(grid, LV_ALIGN_CENTER, 0, 18);
-    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(grid, 14, 0);
-    lv_obj_set_style_pad_row(grid, 16, 0);
-    lv_obj_set_scrollbar_mode(grid, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_scroll_dir(grid, LV_DIR_VER);
-    for (int i = 0; i < g_app_count; i++) tile(grid, g_apps[i]);
+    /* app carousel: swipe left/right, one app per swipe, the one in the middle snaps to center */
+    s_carousel = lv_obj_create(scr);
+    lv_obj_t *car = s_carousel;
+    lv_obj_remove_style_all(car);
+    lv_obj_set_size(car, UI_SCREEN_SIZE, HOME_TILE_H + 10);
+    lv_obj_align(car, LV_ALIGN_CENTER, 0, 6);
+    lv_obj_set_flex_flow(car, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(car, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(car, HOME_TILE_GAP, 0);
+    lv_obj_set_style_pad_hor(car, (UI_SCREEN_SIZE - HOME_TILE_W) / 2, 0);   /* first and last can center */
+    lv_obj_set_scrollbar_mode(car, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_dir(car, LV_DIR_HOR);
+    lv_obj_set_scroll_snap_x(car, LV_SCROLL_SNAP_CENTER);
+    lv_obj_add_flag(car, LV_OBJ_FLAG_SCROLL_ONE);          /* one app per swipe */
+    lv_obj_remove_flag(car, LV_OBJ_FLAG_SCROLL_ELASTIC);
+    lv_obj_remove_flag(car, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    for (int i = 0; i < g_app_count; i++) tile(car, g_apps[i], HOME_TILE_W, HOME_ORB);
+    lv_obj_add_event_cb(car, carousel_scroll_cb, LV_EVENT_SCROLL, NULL);
+    lv_obj_add_event_cb(car, carousel_scroll_cb, LV_EVENT_SCROLL_END, NULL);
+
+    /* page dots under the carousel */
+    memset(s_dots, 0, sizeof(s_dots));
+    lv_obj_t *dots = lv_obj_create(scr);
+    lv_obj_remove_style_all(dots);
+    lv_obj_remove_flag(dots, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(dots, LV_SIZE_CONTENT, 8);
+    lv_obj_set_flex_flow(dots, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(dots, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(dots, 6, 0);
+    lv_obj_align(dots, LV_ALIGN_BOTTOM_MID, 0, -142);
+    for (int i = 0; i < g_app_count && i < (int)(sizeof(s_dots) / sizeof(s_dots[0])); i++) {
+        lv_obj_t *d = lv_obj_create(dots);
+        lv_obj_remove_style_all(d);
+        lv_obj_set_size(d, 7, 7);
+        lv_obj_set_style_radius(d, 4, 0);
+        lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
+        s_dots[i] = d;
+    }
+
+    /* start on the app you were last in */
+    if (s_center_app >= g_app_count) s_center_app = 0;
+    lv_obj_update_layout(scr);
+    lv_obj_scroll_to_x(car, s_center_app * HOME_TILE_STEP, LV_ANIM_OFF);
+    carousel_update();
 
     /* Wi-Fi status pill */
     lv_obj_t *pill = lv_obj_create(scr);

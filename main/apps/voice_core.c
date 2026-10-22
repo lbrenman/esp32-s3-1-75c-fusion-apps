@@ -12,6 +12,16 @@
  * The WebSocket is opened when the app opens and closed when it closes. Server URL and API key come
  * from the settings store (first boot: secrets.h), so they can be changed on the device.
  *
+ * Translator mode (VOICE_MODE_TRANSLATE, set by the Translator app) uses the same recording,
+ * sending and playback, with a different connection and different text:
+ *   connect   <tr_url>/translate?sourceLanguage=en&targetLanguage=es&x-api-key=...
+ *   send      the same WAV (16 kHz mono), one binary frame per turn; hold to talk only (no wake word)
+ *   receive   {"type":"TRANSLATION","input":{"text":...},"output":{"text":...,"audio":{...}}}, then the
+ *             spoken translation as one binary frame (only if output.audio was announced).
+ *             The older TRANSCRIBED_REQUEST / RESPONSE events and ERROR work too.
+ * Text keeps its accents (UTF-8 for the ui_font_latin_* fonts). See the protocol README of the
+ * translator server for the full contract.
+ *
  * Audio uses Waveshare's bsp_extra helper on top of the 1.75C BSP (the same calls as the working
  * 05_Spec_Analyzer example).
  */
@@ -49,6 +59,7 @@
 #include "model_path.h"
 
 #include "voice.h"
+#include "translate_langs.h"
 #include "text_ascii.h"
 #include "net.h"
 #include "settings_store.h"
@@ -76,8 +87,14 @@ extern const char server_ca_pem_start[] asm("_binary_server_ca_pem_start");
 #define PLAY_FRAMES         512
 #define TURN_TIMEOUT_US     (45LL * 1000 * 1000)
 #define TEXT_ONLY_IDLE_US   (4LL * 1000 * 1000)  // reply text but no audio: return to ready after this
-#define HEARD_MAX_CHARS     200
+#define HEARD_MAX_CHARS     200             // bytes, Voice chat (ASCII)
 #define REPLY_MAX_CHARS     320             // what fits on the round screen
+/* Translator: UTF-8, where a Hindi or Arabic letter takes 2-3 bytes */
+#define TR_HEARD_MAX        360
+#define TR_REPLY_MAX        600
+#define HEARD_CAP()         (s_mode == VOICE_MODE_TRANSLATE ? TR_HEARD_MAX : HEARD_MAX_CHARS)
+#define REPLY_CAP()         (s_mode == VOICE_MODE_TRANSLATE ? TR_REPLY_MAX : REPLY_MAX_CHARS)
+#define REPLAY_MAX_CHUNKS   16              // Translator replay: binary frames kept from the last reply
 #define NOTE_MAX_CHARS      96
 #define RESEND_WAIT_MS      20000           // after a failed send: wait this long for the reconnect, then resend once
 #define MAX_SAMPLES         ((size_t)REC_MAX_SECONDS * REC_RATE)
@@ -101,15 +118,21 @@ enum { CMD_WAKE = 1, CMD_RESTART = 2 };
 enum { REC_CMD_PTT = 1, REC_CMD_SEND = 2 };         /* rec_task: record while held / send what the wake engine captured */
 
 static volatile voice_state_t s_state = VOICE_OFF;
+static volatile voice_mode_t  s_mode = VOICE_MODE_CHAT;  /* which app is using the engine */
 static volatile bool    s_active = false;           // the app is open
 static volatile bool    s_want = true;              // connection switch (Voice server screen); on by default
 #define LIVE()          (s_active && s_want)        // app open and connection wanted
+static volatile bool    s_replaying = false;        // Translator: playing the last reply again
+#define PLAY_OK()       (s_active && (s_want || s_replaying))   // replay works while disconnected too
 static volatile bool    s_recording = false;
 static volatile bool    s_resending = false;        // a failed send is waiting for the reconnect
 static volatile bool    s_rec_cancel = false;       // set by a swipe: discard the recording
 static volatile bool    s_ws_connected = false;
 static volatile bool    s_got_text = false;
 static volatile bool    s_cfg_error = false;        // no usable URL: don't retry until it changes
+static volatile bool    s_restart_pending = false;  // Translator languages changed during a turn: reconnect after it
+static volatile bool    s_tr_audio_wait = false;    // Translator: TRANSLATION announced audio that hasn't arrived
+static volatile int64_t s_tr_audio_deadline_us = 0;
 static bool             s_audio_ok = false;         // codec + tasks started
 static volatile int64_t s_last_activity_us = 0;
 static volatile int64_t s_turn_start_us = 0;
@@ -138,12 +161,14 @@ static SemaphoreHandle_t s_ws_mtx = NULL;           // guards s_ws between send 
 static SemaphoreHandle_t s_txt_mtx = NULL;
 static esp_websocket_client_handle_t s_ws = NULL;
 
-static char s_url[512];
+static char s_url[768];
+static char s_conn_src[SET_LANG_MAX + 1], s_conn_dst[SET_LANG_MAX + 1];   /* Translator: pair in the URL */
 
 /* on-screen text (guarded by s_txt_mtx) */
-static char s_heard[HEARD_MAX_CHARS + 4];
-static char s_reply[REPLY_MAX_CHARS + 8];
+static char s_heard[TR_HEARD_MAX + 4];
+static char s_reply[TR_REPLY_MAX + 8];
 static char s_note[NOTE_MAX_CHARS + 1];
+static char s_txt_src[SET_LANG_MAX + 1], s_txt_dst[SET_LANG_MAX + 1];     /* Translator: pair of the text */
 static volatile uint32_t s_text_ver = 1;
 
 /* receive reassembly (filled from the websocket task) */
@@ -163,12 +188,46 @@ static void set_state(voice_state_t st)
 static void text_lock(void)   { xSemaphoreTake(s_txt_mtx, portMAX_DELAY); }
 static void text_unlock(void) { s_text_ver++; xSemaphoreGive(s_txt_mtx); }
 
+/* Translator replay: a copy of the last reply's audio frames (PSRAM), dropped with the text */
+static play_item_t       s_rep[REPLAY_MAX_CHUNKS];
+static int               s_rep_n = 0;
+static size_t            s_rep_bytes = 0;
+static SemaphoreHandle_t s_rep_mtx = NULL;
+
+static void replay_clear(void)
+{
+    if (!s_rep_mtx) return;
+    xSemaphoreTake(s_rep_mtx, portMAX_DELAY);
+    for (int i = 0; i < s_rep_n; i++) heap_caps_free(s_rep[i].data);
+    s_rep_n = 0;
+    s_rep_bytes = 0;
+    xSemaphoreGive(s_rep_mtx);
+}
+
+static void replay_add(const uint8_t *data, size_t len)
+{
+    if (!s_rep_mtx) return;
+    xSemaphoreTake(s_rep_mtx, portMAX_DELAY);
+    if (s_rep_n < REPLAY_MAX_CHUNKS && s_rep_bytes + len <= RX_MAX_BYTES) {
+        uint8_t *copy = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (copy) {
+            memcpy(copy, data, len);
+            s_rep[s_rep_n].data = copy;
+            s_rep[s_rep_n].len = len;
+            s_rep_n++;
+            s_rep_bytes += len;
+        }
+    }
+    xSemaphoreGive(s_rep_mtx);
+}
+
 static void text_clear(void)
 {
     text_lock();
     s_heard[0] = s_reply[0] = s_note[0] = '\0';
     s_got_text = false;
     text_unlock();
+    replay_clear();                     /* a new turn: the old reply can't be replayed any more */
 }
 
 static void set_note(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -182,26 +241,75 @@ static void set_note(const char *fmt, ...)
     text_unlock();
 }
 
+/* Drops a UTF-8 character cut off at the end of s (after a byte-limited copy). */
+static void utf8_fix_tail(char *s)
+{
+    size_t n = strlen(s), i = n;
+    while (i > 0 && ((unsigned char)s[i - 1] & 0xC0) == 0x80) i--;    /* continuation bytes */
+    if (i == 0) return;
+    unsigned char lead = (unsigned char)s[i - 1];
+    size_t need = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+    if (n - (i - 1) < need) s[i - 1] = '\0';
+}
+
 static void set_heard(const char *text)
 {
     text_lock();
-    snprintf(s_heard, sizeof(s_heard), "\"%s\"", text);
+    if (s_mode == VOICE_MODE_TRANSLATE) {
+        strlcpy(s_heard, text, TR_HEARD_MAX + 1);
+        utf8_fix_tail(s_heard);
+    } else {
+        snprintf(s_heard, HEARD_MAX_CHARS + 3, "\"%s\"", text);    /* as before: fits Voice chat's buffer */
+    }
     text_unlock();
+}
+
+/* Translator: the translation replaces whatever is shown (TRANSLATION.output.text) */
+static void set_reply(const char *text)
+{
+    text_lock();
+    strlcpy(s_reply, text, TR_REPLY_MAX + 1);
+    if (strlen(text) > TR_REPLY_MAX) {
+        s_reply[TR_REPLY_MAX - 3] = '\0';
+        utf8_fix_tail(s_reply);
+        strcat(s_reply, "...");
+    }
+    s_note[0] = '\0';
+    text_unlock();
+}
+
+static void set_text_langs(const char *src, const char *dst)
+{
+    text_lock();
+    if (src && src[0]) strlcpy(s_txt_src, src, sizeof(s_txt_src));
+    if (dst && dst[0]) strlcpy(s_txt_dst, dst, sizeof(s_txt_dst));
+    text_unlock();
+}
+
+void voice_text_langs(char *src, size_t src_len, char *dst, size_t dst_len)
+{
+    xSemaphoreTake(s_txt_mtx, portMAX_DELAY);
+    if (src) strlcpy(src, s_txt_src, src_len);
+    if (dst) strlcpy(dst, s_txt_dst, dst_len);
+    xSemaphoreGive(s_txt_mtx);
 }
 
 static void reply_append(const char *text)
 {
     text_lock();
     size_t cur = strlen(s_reply);
-    if (cur > 0 && cur < REPLY_MAX_CHARS) {
-        strncat(s_reply, "\n", REPLY_MAX_CHARS - cur);
+    const size_t cap = REPLY_CAP();
+    if (cur > 0 && cur < cap) {
+        strncat(s_reply, "\n", cap - cur);
         cur++;
     }
-    if (cur < REPLY_MAX_CHARS) {
-        strncat(s_reply, text, REPLY_MAX_CHARS - cur);
+    if (cur < cap) {
+        strncat(s_reply, text, cap - cur);
     }
-    if (strlen(text) + cur > REPLY_MAX_CHARS) {
-        strcpy(s_reply + REPLY_MAX_CHARS - 3, "...");
+    if (strlen(text) + cur > cap) {
+        s_reply[cap - 3] = '\0';
+        utf8_fix_tail(s_reply);          /* Translator text is UTF-8 */
+        strcat(s_reply, "...");
     }
     s_note[0] = '\0';
     text_unlock();
@@ -230,7 +338,7 @@ const char *voice_state_text(voice_state_t st)
     case VOICE_CONNECTING: return "Connecting...";
     case VOICE_READY:      return s_wl_running ? "Say \"" WAKE_WORD_LABEL "\"" : "Hold to talk";
     case VOICE_LISTENING:  return "Listening...";
-    case VOICE_THINKING:   return "Thinking...";
+    case VOICE_THINKING:   return s_mode == VOICE_MODE_TRANSLATE ? "Translating..." : "Thinking...";
     case VOICE_SPEAKING:   return "Speaking...";
     case VOICE_ERROR:      return "Not connected";
     case VOICE_DISCONNECTED: return "Disconnected";
@@ -423,28 +531,117 @@ static void url_host(const char *url, char *out, size_t out_len)
 }
 
 /* -------------------------------------------------------- server messages */
+
+/* Text for the screen. Voice chat: ASCII look-alikes. Translator: Latin with accents, Cyrillic,
+ * Arabic and Devanagari (pre-shaped); text mostly in a script the fonts can't draw (Chinese,
+ * Japanese, Korean) becomes a short note naming the language instead of a row of question marks. */
+static void display_text(const char *in, char *out, size_t out_len, const char *lang)
+{
+    if (s_mode != VOICE_MODE_TRANSLATE) {
+        text_to_ascii(in, out, out_len);
+        return;
+    }
+    size_t missing = text_to_intl(in, out, out_len);   /* WebSocket task only (static buffers) */
+    if (missing == 0) return;
+    size_t letters = 0;                       /* characters that aren't spaces or ASCII punctuation */
+    for (const unsigned char *p = (const unsigned char *)in; *p; p++) {
+        if ((*p & 0xC0) == 0x80) continue;    /* continuation byte */
+        if (*p >= 0x80 || isalnum(*p)) letters++;
+    }
+    if (missing * 2 >= letters) {
+        const tr_lang_t *l = tr_lang_find(lang);
+        snprintf(out, out_len, "(%s text - this screen can't show it)", l ? l->name : "The");
+    }
+}
+
+static const char *json_str(cJSON *obj, const char *key)
+{
+    cJSON *v = cJSON_GetObjectItem(obj, key);
+    return cJSON_IsString(v) ? v->valuestring : NULL;
+}
+
+/* Translator: {"type":"TRANSLATION","sourceLanguage":"en","targetLanguage":"es",
+ *              "input":{"text":"..."},"output":{"text":"...","audio":{"mimeType":"audio/mpeg","bytes":N}}} */
+static void handle_translation(cJSON *obj)
+{
+    static char t[1024];   /* WebSocket task only */
+    const char *src = json_str(obj, "sourceLanguage");
+    const char *dst = json_str(obj, "targetLanguage");
+    set_text_langs(src, dst);
+    char cur_src[SET_LANG_MAX + 1], cur_dst[SET_LANG_MAX + 1];
+    voice_text_langs(cur_src, sizeof(cur_src), cur_dst, sizeof(cur_dst));
+
+    cJSON *input = cJSON_GetObjectItem(obj, "input");
+    cJSON *output = cJSON_GetObjectItem(obj, "output");
+    const char *in_text = cJSON_IsObject(input) ? json_str(input, "text") : NULL;
+    const char *out_text = cJSON_IsObject(output) ? json_str(output, "text") : NULL;
+    cJSON *audio = cJSON_IsObject(output) ? cJSON_GetObjectItem(output, "audio") : NULL;
+    bool has_audio = cJSON_IsObject(audio);
+
+    if (in_text) {
+        display_text(in_text, t, sizeof(t), cur_src);
+        set_heard(t);
+    }
+    if (out_text) {
+        display_text(out_text, t, sizeof(t), cur_dst);
+        set_reply(t);
+    }
+    /* the texts go to the log as received (UTF-8); they're what was said, not secrets */
+    ESP_LOGI(TAG, "Translation %s -> %s: \"%s\" -> \"%s\"%s", cur_src, cur_dst, in_text ? in_text : "",
+             out_text ? out_text : "", has_audio ? " (audio follows)" : " (text only)");
+
+    if (has_audio) {
+        cJSON *bytes = cJSON_GetObjectItem(audio, "bytes");
+        const char *mime = json_str(audio, "mimeType");
+        ESP_LOGI(TAG, "Spoken translation announced: %s, %d bytes", mime ? mime : "?",
+                 cJSON_IsNumber(bytes) ? bytes->valueint : -1);
+        s_tr_audio_deadline_us = esp_timer_get_time() + (int64_t)TR_AUDIO_WAIT_MS * 1000;
+        s_tr_audio_wait = true;
+    } else {
+        /* text only: the turn is done */
+        s_tr_audio_wait = false;
+        if (s_state == VOICE_THINKING) set_state(VOICE_READY);
+    }
+}
+
 static void handle_event_obj(cJSON *obj)
 {
     static char m[1024];   /* display-safe copy of "message" (called from the WebSocket task only) */
     cJSON *type = cJSON_GetObjectItem(obj, "type");
     cJSON *msg  = cJSON_GetObjectItem(obj, "message");
-    text_to_ascii(cJSON_IsString(msg) ? msg->valuestring : "", m, sizeof(m));
+    bool translate = (s_mode == VOICE_MODE_TRANSLATE);
+    char src[SET_LANG_MAX + 1], dst[SET_LANG_MAX + 1];
+    voice_text_langs(src, sizeof(src), dst, sizeof(dst));
+    const char *msg_lang = dst;
+    if (cJSON_IsString(type) && strcmp(type->valuestring, "TRANSCRIBED_REQUEST") == 0) msg_lang = src;
+    display_text(cJSON_IsString(msg) ? msg->valuestring : "", m, sizeof(m), msg_lang);
 
     if (!cJSON_IsString(type)) {
         /* object without a type: show it compactly */
         char *s = cJSON_PrintUnformatted(obj);
-        if (s) { text_to_ascii(s, m, sizeof(m)); reply_append(m); cJSON_free(s); }
+        if (s) { display_text(s, m, sizeof(m), dst); reply_append(m); cJSON_free(s); }
         s_got_text = true;
         return;
     }
 
-    if (strcmp(type->valuestring, "TRANSCRIBED_REQUEST") == 0) {
+    if (translate && strcmp(type->valuestring, "TRANSLATION") == 0) {
+        handle_translation(obj);
+    } else if (strcmp(type->valuestring, "TRANSCRIBED_REQUEST") == 0) {
         ESP_LOGI(TAG, "Heard: %s", m);
         set_heard(m);
     } else if (strcmp(type->valuestring, "RESPONSE") == 0) {
         ESP_LOGI(TAG, "Reply: %s", m);
         reply_append(m);
         s_got_text = true;
+    } else if (translate && strcmp(type->valuestring, "ERROR") == 0) {
+        /* {"type":"ERROR","code":"...","stage":"transcribe","message":"...","retryable":true} */
+        const char *code = json_str(obj, "code");
+        const char *stage = json_str(obj, "stage");
+        ESP_LOGE(TAG, "Server error%s%s%s%s: %s", code ? " " : "", code ? code : "",
+                 stage ? " at " : "", stage ? stage : "", m);
+        set_note("%s", m[0] ? m : "Server error");
+        s_tr_audio_wait = false;              /* e.g. SPEECH_FAILED: no audio is coming */
+        if (s_state == VOICE_THINKING) set_state(VOICE_READY);
     } else if (strcmp(type->valuestring, "ERROR") == 0) {
         ESP_LOGE(TAG, "Server error: %s", m);
         char e[1100];
@@ -463,7 +660,9 @@ static void handle_text(const char *text)
         /* plain text reply */
         static char t[1024];
         ESP_LOGI(TAG, "Text: %s", text);
-        text_to_ascii(text, t, sizeof(t));
+        char dst[SET_LANG_MAX + 1];
+        voice_text_langs(NULL, 0, dst, sizeof(dst));
+        display_text(text, t, sizeof(t), dst);
         reply_append(t);
         s_got_text = true;
         return;
@@ -497,19 +696,21 @@ static void handle_ws_data(const esp_websocket_event_data_t *d)
 {
     if (d->op_code == 0x08) {   // close frame: first two bytes are the close code
         int code = (d->data_len >= 2) ? (((uint8_t)d->data_ptr[0] << 8) | (uint8_t)d->data_ptr[1]) : 0;
+        char raw[96] = "", reason[64];
+        int rlen = d->data_len > 2 ? d->data_len - 2 : 0;
+        if (rlen > (int)sizeof(raw) - 1) rlen = sizeof(raw) - 1;
+        if (rlen > 0) memcpy(raw, d->data_ptr + 2, rlen);
+        raw[rlen] = '\0';
+        text_to_ascii(raw, reason, sizeof(reason));
         ESP_LOGW(TAG, "Server closed the connection, code %d", code);
 #if VOICE_DIAG
-        char reason[96] = "";
-        int rlen = d->data_len > 2 ? d->data_len - 2 : 0;
-        if (rlen > (int)sizeof(reason) - 1) rlen = sizeof(reason) - 1;
-        if (rlen > 0) memcpy(reason, d->data_ptr + 2, rlen);
-        reason[rlen] = '\0';
         ESP_LOGW(DTAG, "CLOSE frame from server: code=%d reason=\"%s\"", code, reason);
         diag("after server CLOSE");
 #endif
         if (code == 1006) set_note("Server refused the connection - check the API key");
         else if (code == 1009) set_note("Recording too large for the server");
         else if (code == 1011) set_note("Server error (1011)");
+        else if (code != 1000 && reason[0]) set_note("Server closed the connection (%d: %s)", code, reason);
         return;
     }
     if (d->op_code == 0x0A) { s_dg.last_pong_us = esp_timer_get_time(); s_dg.pongs++; return; }  // pong
@@ -557,6 +758,8 @@ static void handle_ws_data(const esp_websocket_event_data_t *d)
         if (item.data) {
             memcpy(item.data, s_rx_buf, s_rx_len);
             ESP_LOGI(TAG, "Received %u bytes of reply audio", (unsigned)s_rx_len);
+            s_tr_audio_wait = false;
+            if (s_mode == VOICE_MODE_TRANSLATE) replay_add(s_rx_buf, s_rx_len);
             if (xQueueSend(s_play_q, &item, 0) != pdTRUE) {
                 ESP_LOGW(TAG, "Playback queue full; dropping audio");
                 heap_caps_free(item.data);
@@ -623,6 +826,28 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t id, void 
     }
 }
 
+/* Translator: the endpoint for a base URL, as the web app builds it:
+ *   wss://host:4443/translator             -> wss://host:4443/translator/translate
+ *   wss://host:4443/translator/            -> wss://host:4443/translator/translate
+ *   wss://host:4443/translator/translate   -> unchanged (never doubled)
+ *   wss://host:4443/translator/speech      -> wss://host:4443/translator/translate
+ * A query string on the base URL is kept. */
+void voice_tr_endpoint(const char *base, char *out, size_t out_len)
+{
+    char path[SET_URL_MAX + 1], query[SET_URL_MAX + 1] = "";
+    strlcpy(path, base, sizeof(path));
+    char *q = strchr(path, '?');
+    if (q) { strlcpy(query, q, sizeof(query)); *q = '\0'; }
+    size_t n = strlen(path);
+    while (n > 0 && path[n - 1] == '/') path[--n] = '\0';
+    const char *speech = "/speech";
+    size_t sl = strlen(speech), tl = strlen(TR_PATH);
+    if (n >= sl && strcmp(path + n - sl, speech) == 0) path[n - sl] = '\0';
+    n = strlen(path);
+    bool has = n >= tl && strcmp(path + n - tl, TR_PATH) == 0;
+    snprintf(out, out_len, "%s%s%s", path, has ? "" : TR_PATH, query);
+}
+
 /* ----------------------------------------------------- WebSocket lifecycle
  * Runs only in the control task, so starting/stopping never races and never
  * blocks the LVGL task. */
@@ -631,8 +856,11 @@ static void ws_start(void)
     app_settings_t cfg;
     settings_get(&cfg);
 
-    if (strncmp(cfg.ws_url, "wss://", 6) != 0 && strncmp(cfg.ws_url, "ws://", 5) != 0) {
-        ESP_LOGE(TAG, "Server URL must start with wss:// (Voice > swipe up > Server URL)");
+    bool translate = (s_mode == VOICE_MODE_TRANSLATE);
+    const char *base = translate ? cfg.tr_url : cfg.ws_url;
+    if (strncmp(base, "wss://", 6) != 0 && strncmp(base, "ws://", 5) != 0) {
+        ESP_LOGE(TAG, "Server URL must start with wss:// (%s > swipe up > Server URL)",
+                 translate ? "Translator" : "Voice chat");
         set_note("Set the server URL: swipe up");
         s_cfg_error = true;
         set_state(VOICE_ERROR);
@@ -640,16 +868,35 @@ static void ws_start(void)
     }
 
     char key_enc[3 * SET_KEY_MAX + 1];
-    url_encode(cfg.ws_api_key, key_enc, sizeof(key_enc));
-    const char *conv = cfg.conversation_id;    /* saved in settings; same for every turn and reconnect */
-
-    const char *sep = strchr(cfg.ws_url, '?') ? "&" : "?";
-    snprintf(s_url, sizeof(s_url), "%s%sx-api-key=%s&conversationId=%s", cfg.ws_url, sep, key_enc, conv);
-    /* never log the key */
-    ESP_LOGI(TAG, "Connecting to %s (conversationId=%s)", cfg.ws_url, conv);
+    char endpoint[SET_URL_MAX + 32];
+    if (translate) {
+        if (!tr_pair_valid(cfg.tr_src, cfg.tr_dst)) {
+            ESP_LOGE(TAG, "Translator languages %s -> %s aren't a usable pair", cfg.tr_src, cfg.tr_dst);
+            set_note("Pick the languages: tap the language bar");
+            s_cfg_error = true;
+            set_state(VOICE_ERROR);
+            return;
+        }
+        url_encode(cfg.tr_api_key, key_enc, sizeof(key_enc));
+        voice_tr_endpoint(cfg.tr_url, endpoint, sizeof(endpoint));
+        strlcpy(s_conn_src, cfg.tr_src, sizeof(s_conn_src));
+        strlcpy(s_conn_dst, cfg.tr_dst, sizeof(s_conn_dst));
+        snprintf(s_url, sizeof(s_url), "%s%ssourceLanguage=%s&targetLanguage=%s&x-api-key=%s", endpoint,
+                 strchr(endpoint, '?') ? "&" : "?", s_conn_src, s_conn_dst, key_enc);
+        /* never log the key */
+        ESP_LOGI(TAG, "Connecting to %s (%s -> %s)", endpoint, s_conn_src, s_conn_dst);
+    } else {
+        url_encode(cfg.ws_api_key, key_enc, sizeof(key_enc));
+        const char *conv = cfg.conversation_id;    /* saved in settings; same for every turn and reconnect */
+        strlcpy(endpoint, cfg.ws_url, sizeof(endpoint));
+        const char *sep = strchr(cfg.ws_url, '?') ? "&" : "?";
+        snprintf(s_url, sizeof(s_url), "%s%sx-api-key=%s&conversationId=%s", cfg.ws_url, sep, key_enc, conv);
+        /* never log the key */
+        ESP_LOGI(TAG, "Connecting to %s (conversationId=%s)", cfg.ws_url, conv);
+    }
 
     char host[128];
-    url_host(cfg.ws_url, host, sizeof(host));
+    url_host(endpoint, host, sizeof(host));
 
     esp_websocket_client_config_t wc = {
         .uri = s_url,
@@ -714,6 +961,16 @@ static void supervise(void)
 {
     if (s_state != VOICE_THINKING || s_resending) return;   /* the resend manages its own timing */
     int64_t now = esp_timer_get_time();
+    if (s_tr_audio_wait) {
+        /* Translator: the text is on screen and the spoken translation was announced */
+        if (now > s_tr_audio_deadline_us && uxQueueMessagesWaiting(s_play_q) == 0) {
+            ESP_LOGW(TAG, "The announced spoken translation didn't arrive within %d s", TR_AUDIO_WAIT_MS / 1000);
+            s_tr_audio_wait = false;
+            set_note("The spoken translation didn't arrive");
+            set_state(VOICE_READY);
+        }
+        return;
+    }
     if (s_got_text && uxQueueMessagesWaiting(s_play_q) == 0 && now - s_last_rx_us > TEXT_ONLY_IDLE_US) {
         set_state(VOICE_READY);
     } else if (now - s_turn_start_us > TURN_TIMEOUT_US) {
@@ -732,6 +989,15 @@ static void ctl_task(void *arg)
         if (cmd == CMD_RESTART) {
             ws_stop();
             s_cfg_error = false;
+        } else if (s_restart_pending && s_active && s_want && !s_recording && !s_resending &&
+                   s_state != VOICE_LISTENING && s_state != VOICE_THINKING && s_state != VOICE_SPEAKING &&
+                   uxQueueMessagesWaiting(s_play_q) == 0) {
+            /* Translator languages changed during a turn: reconnect now that it's over */
+            s_restart_pending = false;
+            ESP_LOGI(TAG, "Reconnecting with the new languages");
+            ws_stop();
+            s_cfg_error = false;
+            set_state(net_is_up() ? VOICE_CONNECTING : VOICE_WAIT_WIFI);
         }
         if (!s_active) {
             ws_stop();
@@ -742,7 +1008,7 @@ static void ctl_task(void *arg)
                 ws_stop();
                 ESP_LOGI(TAG, "Disconnected");
             }
-            if (s_state != VOICE_DISCONNECTED && s_state != VOICE_ERROR) set_state(VOICE_DISCONNECTED);
+            if (s_state != VOICE_DISCONNECTED && s_state != VOICE_ERROR && !s_replaying) set_state(VOICE_DISCONNECTED);
             continue;
         }
         if (!s_ws && !s_cfg_error) {
@@ -758,7 +1024,7 @@ static void ctl_task(void *arg)
 #if VOICE_IDLE_DISCONNECT_MS > 0
         /* close an idle connection, on any screen; tap the mic (or the switch) to reconnect.
          * Not with the wake word on: then the connection has to be ready when you say it. */
-        if (s_state == VOICE_READY && voice_wake_status() != WAKE_ON &&
+        if (s_state == VOICE_READY && !(s_mode == VOICE_MODE_CHAT && voice_wake_status() == WAKE_ON) &&
             voice_idle_us() > (int64_t)VOICE_IDLE_DISCONNECT_MS * 1000) {
             ESP_LOGI(TAG, "Idle for %d min: disconnecting", VOICE_IDLE_DISCONNECT_MS / 60000);
             s_want = false;
@@ -770,9 +1036,70 @@ static void ctl_task(void *arg)
     }
 }
 
+void voice_set_mode(voice_mode_t mode)
+{
+    if (s_active || mode == s_mode) return;   /* only between apps */
+    s_mode = mode;
+    ESP_LOGI(TAG, "Mode: %s", mode == VOICE_MODE_TRANSLATE ? "Translator" : "Voice chat");
+}
+
+voice_mode_t voice_mode(void) { return s_mode; }
+bool         voice_audio_pending(void) { return s_tr_audio_wait && s_state == VOICE_THINKING; }
+
+bool voice_can_replay(void)
+{
+    voice_state_t st = s_state;
+    return s_rep_n > 0 && !s_recording && !s_replaying &&
+           (st == VOICE_READY || st == VOICE_DISCONNECTED || st == VOICE_CONNECTING ||
+            st == VOICE_WAIT_WIFI || st == VOICE_ERROR);
+}
+
+bool voice_replay(void)
+{
+    if (!s_active || !voice_can_replay()) return false;
+    xSemaphoreTake(s_rep_mtx, portMAX_DELAY);
+    int queued = 0;
+    s_replaying = true;
+    for (int i = 0; i < s_rep_n; i++) {
+        play_item_t item = {
+            .data = heap_caps_malloc(s_rep[i].len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+            .len = s_rep[i].len,
+        };
+        if (!item.data) break;
+        memcpy(item.data, s_rep[i].data, item.len);
+        if (xQueueSend(s_play_q, &item, 0) != pdTRUE) { heap_caps_free(item.data); break; }
+        queued++;
+    }
+    xSemaphoreGive(s_rep_mtx);
+    if (queued == 0) {
+        s_replaying = false;
+        return false;
+    }
+    ESP_LOGI(TAG, "Replaying the last translation (%d part%s)", queued, queued == 1 ? "" : "s");
+    s_last_activity_us = esp_timer_get_time();
+    set_state(VOICE_SPEAKING);
+    return true;
+}
+
+void voice_reconnect_when_idle(void)
+{
+    if (!s_active || !s_want) return;         /* not connected: the next connect uses the new pair */
+    bool busy = s_recording || s_resending || s_state == VOICE_LISTENING ||
+                s_state == VOICE_THINKING || s_state == VOICE_SPEAKING;
+    if (busy) {
+        ESP_LOGI(TAG, "Languages changed: reconnecting after this turn");
+        s_restart_pending = true;
+        return;
+    }
+    s_restart_pending = false;
+    voice_reconnect();
+}
+
 void voice_set_active(bool active)
 {
     if (active == s_active) return;
+    s_restart_pending = false;
+    s_tr_audio_wait = false;
     if (active) {
         text_clear();
         s_cfg_error = false;
@@ -788,7 +1115,9 @@ void voice_set_active(bool active)
         set_state(net_is_up() ? VOICE_CONNECTING : VOICE_WAIT_WIFI);
     } else {
         s_active = false;
+        s_replaying = false;
         voice_ptt_cancel();
+        replay_clear();                      /* give the audio copy's memory back */
         s_state = VOICE_OFF;
     }
     uint32_t cmd = CMD_WAKE;
@@ -959,6 +1288,8 @@ static size_t record_held(int16_t *io, size_t io_bytes)
 {
     set_state(VOICE_LISTENING);
     text_clear();
+    s_tr_audio_wait = false;
+    set_text_langs(s_conn_src, s_conn_dst);      /* Translator: the pair this turn goes out with */
 
     size_t got = 0;
     bsp_extra_i2s_read(io, io_bytes, &got, 200);   // drop stale buffered audio
@@ -1077,7 +1408,8 @@ void voice_set_foreground(bool on)
 
 static bool wake_should_run(void)
 {
-    return s_wn_name && s_wake_enabled && !s_wake_nomem && s_audio_ok && s_active && s_fg && s_want;
+    return s_mode == VOICE_MODE_CHAT && s_wn_name && s_wake_enabled && !s_wake_nomem && s_audio_ok &&
+           s_active && s_fg && s_want;
 }
 
 static bool ready_for_turn(void)
@@ -1516,7 +1848,7 @@ static void play_pcm16(const uint8_t *pcm, size_t frames, int channels, uint32_t
     #define SAMPLE_AT(i) ((i) == 0 ? s_rs.prev : mono_at(pcm, (i) - 1, channels, frame_bytes))
 
     while (s_rs.pos + 1.0 <= (double)frames) {
-        if (!LIVE()) return;                           /* app closed or disconnected: stop talking */
+        if (!PLAY_OK()) return;                        /* app closed or disconnected: stop talking */
         size_t i = (size_t)s_rs.pos;
         double f = s_rs.pos - (double)i;
         int32_t a = SAMPLE_AT(i);
@@ -1562,7 +1894,8 @@ static void play_task(void *arg)
         play_item_t item;
         xQueueReceive(s_play_q, &item, portMAX_DELAY);
 
-        if (!LIVE()) {                       /* app closed or disconnected: drop the rest of the reply */
+        if (!PLAY_OK()) {                    /* app closed or disconnected: drop the rest of the reply */
+            s_replaying = false;
             heap_caps_free(item.data);
             s_mp3_active = false;
             s_mp3_carry_len = 0;
@@ -1614,7 +1947,7 @@ static void play_task(void *arg)
 
             size_t off = 0;
             int frames_decoded = 0;
-            while (off < in_len && LIVE()) {
+            while (off < in_len && PLAY_OK()) {
                 if (!final_chunk && in_len - off < 4096) break;   // wait for the next message
                 mp3dec_frame_info_t info;
                 int samples = mp3dec_decode_frame(s_mp3, in + off, (int)(in_len - off), s_mp3_pcm, &info);
@@ -1668,7 +2001,10 @@ static void play_task(void *arg)
             s_mp3_active = false;
             s_mp3_carry_len = 0;
             fmt_rate = REC_RATE; fmt_ch = 1; fmt_bits = 16;
-            set_state(s_ws_connected ? VOICE_READY : VOICE_CONNECTING);
+            s_replaying = false;
+            s_last_activity_us = esp_timer_get_time();
+            if (!s_want) set_state(VOICE_DISCONNECTED);          /* a replay while disconnected */
+            else set_state(s_ws_connected ? VOICE_READY : VOICE_CONNECTING);
         }
     }
 }
@@ -1678,6 +2014,7 @@ esp_err_t voice_init(void)
 {
     s_txt_mtx = xSemaphoreCreateMutex();
     s_ws_mtx = xSemaphoreCreateMutex();
+    s_rep_mtx = xSemaphoreCreateMutex();
 #if VOICE_DIAG_VERBOSE
     esp_log_level_set("websocket_client", ESP_LOG_DEBUG);
     esp_log_level_set("transport_ws", ESP_LOG_DEBUG);

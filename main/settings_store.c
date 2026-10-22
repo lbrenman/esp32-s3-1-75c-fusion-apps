@@ -24,10 +24,25 @@
 #ifndef STOCKS_MCP_API_KEY
 #define STOCKS_MCP_API_KEY ""
 #endif
+/* Translator app (added later). Without these, it uses the voice server's host and API key. */
+#ifndef TRANSLATE_API_KEY
+#define TRANSLATE_API_KEY WS_API_KEY
+#endif
+#ifndef TRANSLATE_SOURCE_LANG
+#define TRANSLATE_SOURCE_LANG DEFAULT_TR_SOURCE
+#endif
+#ifndef TRANSLATE_TARGET_LANG
+#define TRANSLATE_TARGET_LANG DEFAULT_TR_TARGET
+#endif
 #define XSTR(x) STR(x)
 #define STR(x)  #x
 
 static const char s_default_url[] = "wss://" WS_HOST ":" XSTR(WS_PORT) WS_PATH;
+#ifdef TRANSLATE_WS_URL
+static const char s_default_tr_url[] = TRANSLATE_WS_URL;
+#else
+static const char s_default_tr_url[] = "wss://" WS_HOST ":" XSTR(WS_PORT) "/translator";
+#endif
 
 static app_settings_t    s_cur;
 static SemaphoreHandle_t s_mtx;
@@ -35,6 +50,7 @@ static SemaphoreHandle_t s_mtx;
 const char *settings_default_url(void) { return s_default_url; }
 const char *settings_build_host(void)  { return WS_HOST; }
 const char *settings_default_mcp_url(void) { return STOCKS_MCP_URL; }
+const char *settings_default_tr_url(void) { return s_default_tr_url; }
 
 static void make_uuid(char *out /* SET_CONV_LEN + 1 bytes */)
 {
@@ -61,6 +77,10 @@ static void load_defaults(app_settings_t *s)
     strlcpy(s->mcp_api_key, STOCKS_MCP_API_KEY, sizeof(s->mcp_api_key));
     s->stocks_auto = DEFAULT_STOCKS_AUTO;
     s->wake_word   = DEFAULT_WAKE_WORD;
+    strlcpy(s->tr_url, s_default_tr_url, sizeof(s->tr_url));
+    strlcpy(s->tr_api_key, TRANSLATE_API_KEY, sizeof(s->tr_api_key));
+    strlcpy(s->tr_src, TRANSLATE_SOURCE_LANG, sizeof(s->tr_src));
+    strlcpy(s->tr_dst, TRANSLATE_TARGET_LANG, sizeof(s->tr_dst));
 }
 
 static void get_str(nvs_handle_t h, const char *key, char *dst, size_t cap)
@@ -106,6 +126,10 @@ void settings_init(void)
         get_str(h, "mcpkey", s_cur.mcp_api_key, sizeof(s_cur.mcp_api_key));
         get_u8(h, "stkauto", &stk_auto);
         get_u8(h, "wake",   &wake);
+        get_str(h, "trurl",  s_cur.tr_url,     sizeof(s_cur.tr_url));
+        get_str(h, "trkey",  s_cur.tr_api_key, sizeof(s_cur.tr_api_key));
+        get_str(h, "trsrc",  s_cur.tr_src,     sizeof(s_cur.tr_src));
+        get_str(h, "trdst",  s_cur.tr_dst,     sizeof(s_cur.tr_dst));
         s_cur.dark_mode = dark != 0;
         s_cur.stocks_auto = stk_auto != 0;
         s_cur.wake_word = wake != 0;
@@ -171,6 +195,10 @@ esp_err_t settings_set(const app_settings_t *in)
     if (strcmp(old.mcp_api_key, in->mcp_api_key)) err |= nvs_set_str(h, "mcpkey", in->mcp_api_key);
     if (old.stocks_auto != in->stocks_auto)     err |= nvs_set_u8(h, "stkauto", in->stocks_auto ? 1 : 0);
     if (old.wake_word != in->wake_word)         err |= nvs_set_u8(h, "wake", in->wake_word ? 1 : 0);
+    if (strcmp(old.tr_url, in->tr_url))         err |= nvs_set_str(h, "trurl", in->tr_url);
+    if (strcmp(old.tr_api_key, in->tr_api_key)) err |= nvs_set_str(h, "trkey", in->tr_api_key);
+    if (strcmp(old.tr_src, in->tr_src))         err |= nvs_set_str(h, "trsrc", in->tr_src);
+    if (strcmp(old.tr_dst, in->tr_dst))         err |= nvs_set_str(h, "trdst", in->tr_dst);
     err |= nvs_commit(h);
     nvs_close(h);
 

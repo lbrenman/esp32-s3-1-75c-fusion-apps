@@ -19,7 +19,8 @@ esp_err_t bsp_display_brightness_set(int p) { printf("brightness %d\n", p); retu
 
 static app_settings_t s = { "Home-WiFi", "example-password", "wss://voice.example.com:4443/ws/speech",
                             "example-api-key-abcd", 1, 80, 75, "3f2a9c1e-7b4d-4e21-9a6f-0c8d5e11c11e",
-                            "https://fusion.example.com:4443/FusionStockWatchListMCP", "example-mcp-key-wxyz", 1, 1 };
+                            "https://fusion.example.com:4443/FusionStockWatchListMCP", "example-mcp-key-wxyz", 1, 1,
+                            "wss://fusion.example.com:4443/translator", "example-tr-key-9f3e", "en", "es" };
 void settings_init(void) {}
 void settings_get(app_settings_t *o) { *o = s; }
 esp_err_t settings_set(const app_settings_t *i) { s = *i; printf("settings saved (dark=%d)\n", s.dark_mode); return 0; }
@@ -31,6 +32,7 @@ esp_err_t settings_new_conversation(char *out, size_t len) {
 const char *settings_default_url(void) { return "wss://example:4443/ws/speech"; }
 const char *settings_build_host(void) { return "example"; }
 const char *settings_default_mcp_url(void) { return "https://example:4443/FusionStockWatchListMCP"; }
+const char *settings_default_tr_url(void) { return "wss://example:4443/translator"; }
 
 net_state_t g_net = NET_UP;
 void net_start(void) {}
@@ -63,13 +65,40 @@ void voice_ptt_release(void) { printf("ptt release\n"); if (g_vs == VOICE_LISTEN
 void voice_ptt_cancel(void) { printf("ptt cancel\n"); if (g_vs == VOICE_LISTENING) g_vs = VOICE_READY; }
 voice_state_t voice_state(void) { return g_vs; }
 /* wake word: sim.c sets g_wake_status and g_fg decides whether it's listening */
+voice_mode_t g_vmode = VOICE_MODE_CHAT;
 wake_status_t g_wake_status = WAKE_ON;
 bool g_fg = false;
 void voice_set_wake_word(bool on) { printf("voice_set_wake_word %d\n", on); g_wake_status = on ? WAKE_ON : WAKE_OFF; }
 wake_status_t voice_wake_status(void) { return g_wake_status; }
-bool voice_wake_listening(void) { return g_wake_status == WAKE_ON && g_fg && g_want; }
+bool voice_wake_listening(void) { return g_vmode == VOICE_MODE_CHAT && g_wake_status == WAKE_ON && g_fg && g_want; }
 void voice_set_foreground(bool on) { g_fg = on; }
+/* Translator mode (sim.c sets g_vmode, g_tsrc/g_tdst and g_audio_pending) */
+char g_tsrc[8] = "en", g_tdst[8] = "es";
+bool g_audio_pending = false;
+void voice_set_mode(voice_mode_t m) { g_vmode = m; printf("voice mode %d\n", m); }
+voice_mode_t voice_mode(void) { return g_vmode; }
+void voice_reconnect_when_idle(void) { printf("voice_reconnect_when_idle (%s -> %s)\n", s.tr_src, s.tr_dst); }
+void voice_text_langs(char *a, size_t al, char *b, size_t bl) { if (a) snprintf(a, al, "%s", g_tsrc); if (b) snprintf(b, bl, "%s", g_tdst); }
+bool voice_audio_pending(void) { return g_audio_pending && g_vs == VOICE_THINKING; }
+bool g_has_replay = false;
+bool voice_can_replay(void) { return g_has_replay && (g_vs == VOICE_READY || g_vs == VOICE_DISCONNECTED); }
+bool voice_replay(void) { if (!voice_can_replay()) return false; printf("voice_replay\n"); g_vs = VOICE_SPEAKING; return true; }
+/* same rules as voice_core.c */
+void voice_tr_endpoint(const char *base, char *out, size_t out_len)
+{
+    char path[256], query[256] = "";
+    snprintf(path, sizeof(path), "%s", base);
+    char *q = strchr(path, '?');
+    if (q) { snprintf(query, sizeof(query), "%s", q); *q = 0; }
+    size_t n = strlen(path);
+    while (n > 0 && path[n - 1] == '/') path[--n] = 0;
+    if (n >= 7 && !strcmp(path + n - 7, "/speech")) path[n - 7] = 0;
+    n = strlen(path);
+    int has = n >= 10 && !strcmp(path + n - 10, "/translate");
+    snprintf(out, out_len, "%s%s%s", path, has ? "" : "/translate", query);
+}
 const char *voice_state_text(voice_state_t st) {
+    if (st == VOICE_THINKING && g_vmode == VOICE_MODE_TRANSLATE) return "Translating...";
     static const char *t[] = {"Off","Waiting for Wi-Fi...","Connecting...","Hold to talk","Listening...","Thinking...","Speaking...","Not connected","Disconnected"};
     if (st == VOICE_READY && voice_wake_listening()) return "Say \"Jarvis\"";
     return t[st]; }

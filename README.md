@@ -3,6 +3,8 @@
 A small "watch OS" for the Waveshare **ESP32-S3-Touch-AMOLED-1.75C**: a home screen with a clock and
 app icons, a **Voice chat** app (client for the Amplify Fusion WebSocket voice server: say "Jarvis" or
 hold to talk),
+a **Translator** app (push-to-talk voice translator for the Amplify Fusion translator server: speak
+English, hear Spanish; also shows Hindi, Arabic and Russian text),
 a **Stocks** app (watchlist client for the FusionStockWatchListMCP server, an Amplify Fusion MCP
 server) and a **Settings** app. Day and night themes, Font Awesome icons, slide transitions.
 
@@ -12,6 +14,15 @@ server) and a **Settings** app. Day and night themes, Font Awesome icons, slide 
 the device.*
 
 ![Stocks](docs/screenshots/stocks.png)
+
+![Translator](docs/screenshots/translator.png)
+
+> **The Translator is new and untested on the board.** It reuses the Voice chat engine (recording,
+> WebSocket, MP3 playback), so most of its path is code that already runs on the device. The new
+> parts (the `/translate` URL with the language pair, `TRANSLATION` replies, the Latin, Arabic and
+> Devanagari fonts, Replay) pass host tests and are syntax-checked against the ESP-IDF 5.5.2 headers, and the screens are
+> checked in `tools/ui_preview`, but it hasn't been built with `idf.py` or talked to the real
+> translator server yet.
 
 > **Stocks is new and untested on the board.** Its screens are compiled and clicked through on a
 > PC against LVGL 9.5 (`tools/ui_preview`), its reply parsing and MCP message handling pass host
@@ -30,9 +41,12 @@ the device.*
 
 | Screen | What it does |
 | --- | --- |
-| **Home** | Battery level and charging state, date and time (from NTP), app icons, Wi-Fi status, day/night button |
+| **Home** | Battery level and charging state, date and time (from NTP), the apps in a carousel (swipe left/right, tap to open), Wi-Fi status, day/night button |
 | **Voice chat** | Say "Jarvis" and your request (wake word), or hold to talk and release to send. Shows what the server heard and its reply, plays the reply audio |
 | **Voice server** (swipe up/down in Voice chat) | See and change the server URL and API key, connect/disconnect switch with status, reset URL to `secrets.h` |
+| **Translator** | Pick the languages on the language bar (English → Spanish at first), hold to talk, release to send. Shows what you said and the translation (with accents, and in Hindi, Arabic or Russian script), and speaks the translation. **Replay** plays it again |
+| **Languages** (tap the language bar) | **From** (13 languages you can speak) and **Into** (9 it can speak back), and **Swap**. Saved on the device |
+| **Translator server** (swipe up/down in Translator) | See and change the translator's base URL and API key, connect/disconnect switch with status, reset URL to `secrets.h`, shortcut to Languages |
 | **Stocks** | Your watchlist: symbol, company, price, change and % change, colored green or red. Refreshes every minute while open; the ↻ / ❚❚ button pauses and resumes auto refresh |
 | **Quote** (tap a row in Stocks) | A detailed quote from `GetStockQuote`: price, change, open, previous close and the day's range (low–high with today's price marked). Refresh and remove buttons |
 | **Pick symbols** (+ or swipe left in Stocks) | Tabs of preset symbols (**QQQ 1**, **QQQ 2**, **Blue Chip**) and **Other** (watchlist symbols not on a tab, e.g. added from Claude). Tap to add (green) or remove (gray) |
@@ -43,6 +57,8 @@ the device.*
 
 | Where | Gesture | Result |
 | --- | --- | --- |
+| Home | Swipe left / right | Next / previous app (one per swipe; the dots show where you are) |
+| Home | Tap the app in the middle (or a neighbor) | Open it. Home comes back to the app you last opened |
 | Voice chat | Say "Jarvis", then your request | Records until you stop talking, then sends (wake word on) |
 | Voice chat | Quick tap | Same as saying "Jarvis" (wake word on) |
 | Voice chat | Touch and hold | Record while held (up to 10 s); release to send |
@@ -50,6 +66,13 @@ the device.*
 | Voice chat | Swipe up / down | Voice server settings |
 | Voice chat, Voice server | Swipe left / right | Back to Home |
 | Voice server | Swipe up / down, or the ⌄ button | Back to Voice chat |
+| Translator | Touch and hold | Record while held (up to 10 s); release to send |
+| Translator | Tap the language bar | Languages (From / Into / Swap) |
+| Translator | Tap **Replay** | Play the last spoken translation again (works while disconnected too). Touches within 14 px of the button count as Replay, never as hold to talk |
+| Translator (disconnected) | Tap | Connect again |
+| Translator | Swipe up / down | Translator server |
+| Translator, Translator server | Swipe left / right | Back to Home |
+| Languages, language lists | Swipe right, or the ‹ button | Back |
 | Stocks | Swipe left, or the + button | Pick symbols |
 | Stocks | Swipe right, or the ‹ button | Back to Home |
 | Stocks | Tap a row | Quote screen for that symbol |
@@ -234,6 +257,36 @@ RPC error or a tool error) is not retried.
 | Red | Not connected | No usable server URL; the note under the mic says what to fix |
 | Gray | Disconnected | Switched off, or idle timeout; tap to connect |
 
+### The Translator
+
+A push-to-talk client for the Amplify Fusion voice translator (the same server the
+`speech_web_app.html` web app talks to). Hold the screen, say something, let go: the screen shows
+what you said and the translation, then speaks it. Only hold to talk: no wake word, no typing.
+
+- **Languages.** Tap the **English → Spanish** bar at the top. **From** lists the 13 languages the
+  server can transcribe (Mistral Voxtral Mini Transcribe V2), **Into** the 9 it can speak (Voxtral
+  TTS). Chinese, Japanese, Korean and Russian can be spoken but not translated into, so **Swap** is
+  off while one of them is the From language. The two sides are never the same: picking the
+  language that's already on the other side swaps them. The pair is saved on the device; first
+  boot is English → Spanish (`DEFAULT_TR_SOURCE` / `DEFAULT_TR_TARGET`, or `TRANSLATE_SOURCE_LANG`
+  / `TRANSLATE_TARGET_LANG` in `secrets.h`).
+- **Changing languages while connected** reconnects, because the pair is part of the connection
+  URL. If a translation is still on its way, the device waits for it to finish first.
+- **Scripts.** The translation and what you said are shown in their own script: Latin with accents
+  (á é ñ ü ç ß œ ...), Russian (Cyrillic), Arabic (letters joined, right to left) and Hindi
+  (Devanagari, with half forms, conjuncts, rakar and reph). See "Text in other scripts" below.
+  Chinese, Japanese and Korean can't be drawn on this screen: it shows "(Chinese text - this
+  screen can't show it)" instead, and the spoken translation still plays.
+- **Replay.** After a spoken translation, a **Replay** button under it plays the audio again. The
+  device keeps a copy of the last translation's audio until your next turn (or until you leave the
+  Translator). It works while disconnected too.
+- **One engine.** Voice chat and the Translator share the microphone, speaker and connection code
+  (`voice_core.c` in two modes), and only one of them is open at a time. The Translator has its
+  own server URL, API key and connection; leaving it closes the connection, as in Voice chat.
+  It also disconnects after `VOICE_IDLE_DISCONNECT_MS` without use; tap to reconnect.
+- **Status line.** Same ring colors as Voice chat, with *Translating...* while the server works and
+  *Loading audio...* between the translation text and its audio.
+
 ---
 
 ## Settings: secrets.h is only the first-boot default
@@ -251,7 +304,21 @@ The Stocks server comes from two lines you add to `main/secrets.h` (see `main/se
 ```
 
 An older `secrets.h` without them still builds; Stocks then asks you to set the URL with the gear
-button. Values already saved on the device win over `secrets.h` until **Settings > Reset settings**.
+button.
+
+The Translator's server is optional in `secrets.h` too:
+
+```c
+#define TRANSLATE_WS_URL    "wss://your-fusion-host:4443/translator"   // base URL; the app adds /translate
+#define TRANSLATE_API_KEY   "your-translator-api-key"
+```
+
+Without them the Translator uses `wss://WS_HOST:WS_PORT/translator` and the voice server's API key.
+The device connects to `<base>/translate?sourceLanguage=en&targetLanguage=es&x-api-key=<key>`; a base
+URL that already ends in `/translate` isn't doubled, and one ending in `/speech` is switched to
+`/translate` (as in the web app). The Translator server screen shows the full endpoint.
+If the translator is on a different host than `WS_HOST`, it's checked against ESP-IDF's built-in CA
+bundle instead of `main/server_ca.pem`. Values already saved on the device win over `secrets.h` until **Settings > Reset settings**.
 
 - **Settings > Reset settings** goes back to the `secrets.h` values.
 - `idf.py erase-flash` also clears them.
@@ -273,7 +340,9 @@ esp32-s3-1-75c-fusion-apps/
 │   ├── settings_store.c/.h        settings in NVS, defaults from secrets.h
 │   ├── net.c/.h                   Wi-Fi station, scanning, NTP clock
 │   ├── mcp_client.c/.h            small MCP client: Streamable HTTP, sessions, SSE replies
-│   ├── text_ascii.c/.h            turns ’ “ ” – é ... into ASCII the built-in fonts can draw
+│   ├── text_ascii.c/.h            turns text into what the fonts can draw (ASCII; or Latin, Cyrillic,
+│   │                              Arabic and pre-shaped Hindi for the Translator)
+│   ├── text_deva_map.h            Hindi pre-shaped sequences (generated with the fonts)
 │   ├── power.c/.h                 battery level and charging from the AXP2101 power chip
 │   ├── display_start.c/.h         starts display + touch + LVGL like the BSP, with smaller draw bands
 │   ├── secrets.h.example          copy to secrets.h (gitignored)
@@ -282,21 +351,29 @@ esp32-s3-1-75c-fusion-apps/
 │   │   ├── ui_theme.c/.h          day/night palettes and app colors
 │   │   ├── ui_nav.c/.h            screen stack, app open/close, transitions
 │   │   ├── ui_widgets.c/.h        list screens, rows, switches, sliders, editor + keyboard, toasts, dialogs
-│   │   └── ui_icons*.c/.h         icon fonts (16/20/28/56 px), generated from Font Awesome
+│   │   ├── ui_icons*.c/.h         icon fonts (16/20/28/56 px), generated from Font Awesome
+│   │   ├── ui_font_latin_*.c, ui_fonts.h   accented Latin + Cyrillic (14/16/20/28 px) on top of the built-in Montserrat
+│   │   └── ui_font_arabic_*.c, ui_font_deva_*.c, ui_fonts_intl.h   Arabic and Devanagari (16/20/28 px)
 │   └── apps/
 │       ├── apps.c/.h              the app list shown on Home
 │       ├── app_home.c             Home screen
 │       ├── app_settings.c         Settings app (+ Wi-Fi scan screen)
 │       ├── app_voice.c            Voice chat screen + Voice server screen
-│       ├── voice_core.c, voice.h  recording, wake word, WebSocket, playback (no LVGL in here)
+│       ├── voice_core.c, voice.h  recording, wake word, WebSocket, playback (no LVGL in here);
+│       │                          Voice chat and Translator modes
+│       ├── app_translate.c        Translator: main screen, Languages + pickers, Translator server
+│       ├── translate_langs.c/.h   the language lists and pair rules (pure C)
 │       ├── app_stocks.c           Stocks: Watchlist, Quote, Pick symbols and Stock server screens
 │       ├── stocks_core.c, stocks.h   the Stocks engine task: tool calls, queue, refresh timer (no LVGL)
 │       └── stocks_parse.c/.h      parses the watchlist server's replies (pure C, host-tested)
 ├── tools/
 │   ├── make_icon_font.py          regenerates main/ui/ui_icons*.c
+│   ├── make_text_font.py          regenerates main/ui/ui_font_latin_*.c
+│   ├── make_script_fonts.py       regenerates main/ui/ui_font_arabic_*.c, ui_font_deva_*.c, main/text_deva_map.h
 │   ├── ui_preview/                runs the UI on your Mac and saves screenshots
 │   └── stocks_test/               host tests for the Stocks reply parsing and MCP reply handling
-├── assets/                        Font Awesome Free TTF + license (input for make_icon_font.py)
+├── assets/                        Font Awesome Free, Montserrat Medium, Noto Sans Arabic / Devanagari
+│                                  Medium TTFs + licenses (font inputs)
 └── docs/screenshots/
 ```
 
@@ -389,7 +466,8 @@ is always verified.
    `g_apps` in `main/apps/apps.c`.
 3. Add the file to `SRCS` in `main/CMakeLists.txt`.
 
-Home lays the tiles out three per row and scrolls when they don't fit.
+Home shows the apps as a carousel in `g_apps` order, one app per swipe, with a page dot each
+(up to 8).
 
 ## Icons
 
@@ -402,6 +480,47 @@ to `ICONS` in `tools/make_icon_font.py`, then regenerate:
 python3 -m pip install --user pillow        # once
 python3 tools/make_icon_font.py assets/fa-solid-900.ttf main/ui
 ```
+
+## Text in other scripts
+
+LVGL's built-in Montserrat fonts are ASCII only. The Translator adds three font families, all
+generated from TTFs in `assets/`, and `text_to_intl()` (`main/text_ascii.c`) prepares text for them.
+The other apps still use `text_to_ascii()` and the built-in fonts.
+
+| Fonts | Sizes | Letters | Made by | Flash |
+| --- | --- | --- | --- | --- |
+| `ui_font_latin_*` | 14, 16, 20, 28 | Latin-1, Latin Extended-A (U+00A0–U+017F), Cyrillic (U+0400–U+045F), Romanian ș ț, curly quotes, dashes, "…", "€"; ASCII from the built-in Montserrat (fallback) | `tools/make_text_font.py` (Montserrat Medium) | ~150 KB |
+| `ui_font_arabic_*` | 16, 20, 28 | Arabic letters and their joined (presentation) forms; Latin via `ui_font_latin_*` | `tools/make_script_fonts.py` (Noto Sans Arabic Medium) | ~240 KB |
+| `ui_font_deva_*` | 16, 20, 28 | Devanagari, plus 162 pre-shaped half forms, conjuncts, rakar and reph forms at U+E000…; Latin via `ui_font_latin_*` | `tools/make_script_fonts.py` (Noto Sans Devanagari Medium) | ~110 KB |
+
+The Translator picks the family from the text itself (the first Arabic or Devanagari letter), so a
+Hindi speaker's reply into Arabic shows both correctly.
+
+- **Arabic** needs LVGL's Arabic/Persian processing (joins the letters) and bidirectional text
+  (right to left): `CONFIG_LV_USE_ARABIC_PERSIAN_CHARS=y` and `CONFIG_LV_USE_BIDI=y` in
+  `sdkconfig.defaults`. `app_translate.c` stops the build with a clear message if they're off.
+- **Hindi** needs shaping, which LVGL doesn't do. `text_to_intl()` does the part Hindi needs most:
+  consonant + virama + consonant becomes a half form, rakar (प्र), reph (र्म) and common conjuncts
+  (क्ष त्र ज्ञ श्र द्ध ...) become one pre-shaped glyph, consonant + nukta becomes the precomposed
+  letter, and the vowel sign ि moves in front of its consonant cluster. Common Hindi reads as it
+  should. Rare stacked conjuncts show with a visible virama (्), and a reph sits over the letter
+  after it rather than at the very end of the syllable. The table of pre-shaped sequences is
+  `main/text_deva_map.h`, generated with the fonts.
+
+To change sizes or letters, edit `SIZES` / `RANGES` / `EXTRA` in `tools/make_text_font.py`
+(and `latin_drawable()` in `main/text_ascii.c`) or `SIZES` / `LIGATURES` in
+`tools/make_script_fonts.py`, then regenerate. `make_script_fonts.py` needs Pillow built with
+libraqm (the Homebrew Pillow has it: `python3 -c "from PIL import features; print(features.check('raqm'))"`)
+and fontTools:
+
+```bash
+python3 -m pip install --user pillow fonttools
+python3 tools/make_text_font.py assets/Montserrat-Medium.ttf main/ui
+python3 tools/make_script_fonts.py assets main
+```
+
+Each Latin size needs its built-in font switched on (`CONFIG_LV_FONT_MONTSERRAT_<size>=y`); the
+file stops the build with a clear message if it isn't.
 
 ## Preview the UI on your Mac
 
@@ -417,6 +536,7 @@ open shots/contact_sheet.png
 
 Change the fake values in `stubs.c` or the click-through script in `sim.c` to preview other states.
 The Stocks screens use a fake watchlist (`stocks_fake_load()` in `stubs.c`); shots `40_` to `59_`.
+The Translator screens are shots `70_` to `92_` (fake translations set in `sim.c`).
 
 ## Test the Stocks parsing on your Mac
 
@@ -443,6 +563,11 @@ make                      # first run clones cJSON; prints "N checks, 0 failed"
 | `app_config.h` + `sdkconfig.defaults` | The wake word: `WAKE_WORD_LABEL`, `WAKE_WORD_MODEL` and `CONFIG_SR_WN_WN9_JARVIS_TTS=y` | Jarvis. For "Computer": `"Computer"`, `"computer"` and `CONFIG_SR_WN_WN9_COMPUTER_TTS=y` (remove the Jarvis line), then `rm sdkconfig && idf.py set-target esp32s3 && idf.py build flash` |
 | `app_config.h` | `DEFAULT_DARK_MODE`, `DEFAULT_BRIGHTNESS`, `DEFAULT_VOLUME` | dark, 80 %, 75 % (first boot) |
 | `apps/voice_core.c` | `REC_MAX_SECONDS`, `TURN_TIMEOUT_US`, `RX_MAX_BYTES` | 10 s, 45 s, 3 MB |
+| `apps/app_home.c` | `HOME_TILE_W`, `HOME_ORB`, `HOME_SIDE_ORB`, `HOME_SIDE_OPA` (carousel tile width, orb size in the middle and beside it, how dim the neighbors are) | 120 px, 104 px, 80 px, 140/255 |
+| `apps/app_translate.c` | `REPLAY_W`, `REPLAY_H`, `REPLAY_EXT_PX` (Replay button size and extra touch margin) | 196 x 66 px, 14 px |
+| `app_config.h` | `DEFAULT_TR_SOURCE`, `DEFAULT_TR_TARGET` | `en`, `es` (first boot) |
+| `app_config.h` | `TR_PATH`, `TR_AUDIO_WAIT_MS` | `/translate`; 15 s wait for announced audio |
+| `apps/translate_langs.c` | `g_tr_langs` (names, which side each can be on) | the 13 / 9 Mistral languages |
 | `app_config.h` | `STOCKS_REFRESH_MS`, `STOCKS_RETRY_MS` | 60 s, 15 s |
 | `app_config.h` | `STOCKS_TOOL_*` (incl. `STOCKS_TOOL_QUOTE`), `STOCKS_SYMBOL_ARG`, `STOCKS_KEY_HEADER` | FusionStockWatchListMCP names, `symbol`, `x-api-key` |
 | `app_config.h` | `DEFAULT_STOCKS_AUTO` | 1 (auto refresh on, first boot) |
@@ -452,6 +577,8 @@ make                      # first run clones cJSON; prints "N checks, 0 failed"
 
 ## Protocol
 
+### Voice chat protocol
+
 Unchanged from voice_chat: connect to `<server URL>?x-api-key=<key>&conversationId=<uuid>`, send
 one binary frame per turn (WAV, 16 kHz mono 16-bit), receive JSON text frames
 (`TRANSCRIBED_REQUEST`, `RESPONSE`, `ERROR`) and binary reply audio (MP3, WAV or raw PCM).
@@ -460,6 +587,32 @@ and every reconnect uses it, across reboots, until you choose **New conversation
 chat, or the conversation button on the Voice server screen). Reset settings also starts a new one.
 Whether the server remembers earlier turns after a reconnect depends on the server keying its
 history on `conversationId` rather than on the WebSocket connection.
+
+### Translator protocol
+
+Connect to `<base>/translate?sourceLanguage=<code>&targetLanguage=<code>&x-api-key=<key>` (ISO 639-1
+codes). Each turn is one binary frame, the same 16 kHz mono WAV as Voice chat. The server answers:
+
+```json
+{"type":"TRANSLATION","sourceLanguage":"en","targetLanguage":"es",
+ "input":{"text":"Where can I buy a train ticket?"},
+ "output":{"text":"¿Dónde puedo comprar un billete de tren?","audio":{"mimeType":"audio/mpeg","bytes":48213}}}
+```
+
+then the spoken translation as one binary frame (MP3 or WAV; played like Voice chat's replies).
+
+- `input.text` is shown as what you said, `output.text` replaces the translation on screen.
+- `output.audio` means a binary frame follows: the status shows *Loading audio...* until it does.
+  Without it the turn ends right away (text only). If announced audio doesn't come within
+  `TR_AUDIO_WAIT_MS`, the device says so and is ready again.
+- `{"type":"ERROR","message":"...","code":"...","stage":"..."}` shows `message` and ends the turn
+  (`code` and `stage` go to the log). A `TRANSLATION` without audio followed by an `ERROR` (the
+  partial-failure pattern) shows the translation with the error under it.
+- A frame can hold one event or an array of them. The older `TRANSCRIBED_REQUEST` / `RESPONSE`
+  events work too.
+- The client sends no conversation ID: each turn stands alone.
+- If the server closes the connection with a reason, the reason is shown (for example
+  *Server closed the connection (1001: Integration disabled)*).
 
 ## Diagnosing connection drops
 
@@ -533,6 +686,15 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app
 | `Draw bitmap failed: ESP_ERR_NO_MEM` | Too little internal RAM for display DMA | Check the `SPIRAM_MALLOC_*` lines are in `sdkconfig.defaults`, then `rm sdkconfig` and set-target again |
 | Recorded 0 ms / no transcript | Mic not capturing | Confirm the board is the 1.75C |
 | `tx WAV ... result 0 ... (FAILED)` after ~15 s, then a reconnect | Wi-Fi link stalled (often a weak signal: check the dBm in the `net:` and `vdiag` lines) | The app resends automatically; move closer to the access point if it repeats |
+| Translator: "Set the server URL: swipe up" | Translator URL doesn't start with `wss://` | Swipe up > Server URL (the base URL, e.g. `wss://host:4443/translator`) |
+| Translator: "Can't reach the server" or "Server refused the connection" | Wrong base URL (check the full endpoint on the Translator server screen) or API key; the server must accept `x-api-key` as a query parameter | Swipe up; compare with the URL that works in the web app |
+| Translator: "Server closed the connection (1001: Integration disabled)" | The Fusion integration is turned off | Enable the integration in Fusion, then tap to connect |
+| Translator: translation looks like JSON with translated keys | The Fusion flow translates the whole frame | Only voice is sent from the device; check the flow's `TRANSLATION` reply in the `voice:` log |
+| Translator: "The spoken translation didn't arrive" | `TRANSLATION` announced `output.audio` but no binary frame followed within 15 s | Fix the flow: send the audio frame after the JSON, or leave `output.audio` out |
+| Translator: "(Chinese text - this screen can't show it)" | The fonts have no Chinese, Japanese or Korean | Expected; the translation is still spoken, and the log has the original text |
+| Build stops: "The Translator needs CONFIG_LV_USE_BIDI=y and CONFIG_LV_USE_ARABIC_PERSIAN_CHARS=y" | Your `sdkconfig` predates those lines in `sdkconfig.defaults` | `rm sdkconfig && idf.py set-target esp32s3`, then build |
+| Translator: Arabic letters not joined, or in the wrong order | Same cause (the options are off in the preview or an old build) | As above |
+| Translator: no Replay button | Nothing to replay: the reply had no audio, or a new turn started | Replay appears after a spoken translation |
 | Swipes start recordings, or holds count as swipes | Swipe thresholds | Adjust `UI_SWIPE_MIN_PX` / `UI_SWIPE_MAX_MS` |
 | Stocks: "Set the server URL (gear button)" | `STOCKS_MCP_URL` missing from `secrets.h`, or still the placeholder | Gear > Server URL, or add it to `secrets.h` and Reset settings |
 | Stocks: "HTTP 401 - check the API key" (or 403) | API key | Gear > API key |
@@ -543,5 +705,5 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app
 | Stocks: a row says "no quote" | The server accepted a ticker its quote service doesn't know | Long-press the row, or remove it on the Other tab |
 | Pick: a button stays green after a remove | The server had the symbol twice and removed one copy | Tap it again |
 | Pick: "Still loading the watchlist..." | Taps wait until the symbol list has loaded once | Wait for the status line to show the count |
-| A name shows ' where the real one has ’ (e.g. an iPhone hotspot "Leor's iPhone") | The built-in fonts are ASCII-only, so Wi-Fi names, stock names and voice replies are shown with ASCII look-alikes | Nothing to fix: the real name is what's saved and joined |
+| A name shows ' where the real one has ’ (e.g. an iPhone hotspot "Leor's iPhone") | The built-in fonts are ASCII-only, so Wi-Fi names, stock names and voice replies are shown with ASCII look-alikes (the Translator has its own accented fonts) | Nothing to fix: the real name is what's saved and joined |
 | No battery level on Home | The AXP2101 didn't answer on I2C (`power:` lines in the log) | Check the log line; the rest of the app works without it |

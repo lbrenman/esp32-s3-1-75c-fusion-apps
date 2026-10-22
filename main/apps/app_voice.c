@@ -572,7 +572,11 @@ static lv_obj_t *voice_settings_build(void *arg)
 
 /* ===================================================== app descriptor */
 static lv_obj_t *voice_app_build(void *arg) { return voice_build(arg); }
-static void voice_enter(void) { voice_set_active(true); }
+static void voice_enter(void)
+{
+    voice_set_mode(VOICE_MODE_CHAT);         /* the engine is shared with the Translator */
+    voice_set_active(true);
+}
 static void voice_leave(void) { voice_set_active(false); }
 
 const ui_app_t APP_VOICE = {

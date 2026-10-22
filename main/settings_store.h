@@ -12,6 +12,7 @@
 #define SET_URL_MAX   200
 #define SET_KEY_MAX   128
 #define SET_CONV_LEN  36            /* UUID, e.g. 3f2a9c1e-....-c11e */
+#define SET_LANG_MAX  7             /* ISO 639-1 code, e.g. "en" (room for "pt-BR") */
 
 typedef struct {
     char    wifi_ssid[SET_SSID_MAX + 1];
@@ -26,6 +27,10 @@ typedef struct {
     char    mcp_api_key[SET_KEY_MAX + 1];
     bool    stocks_auto;                  /* Stocks: refresh quotes automatically */
     bool    wake_word;                    /* Voice chat: listen for the wake word (else hold to talk only) */
+    char    tr_url[SET_URL_MAX + 1];      /* Translator: base URL, wss://host:port/translator (the app adds /translate) */
+    char    tr_api_key[SET_KEY_MAX + 1];
+    char    tr_src[SET_LANG_MAX + 1];     /* Translator: language you speak, e.g. "en" */
+    char    tr_dst[SET_LANG_MAX + 1];     /* Translator: language to translate into, e.g. "es" */
 } app_settings_t;
 
 /* Initializes NVS and loads the settings. Call once, first thing in app_main. */
@@ -48,6 +53,9 @@ const char *settings_default_url(void);
 
 /* The Stocks MCP server URL from secrets.h (STOCKS_MCP_URL). */
 const char *settings_default_mcp_url(void);
+
+/* The Translator server base URL from secrets.h (TRANSLATE_WS_URL, or wss://WS_HOST:WS_PORT/translator). */
+const char *settings_default_tr_url(void);
 
 /* The WS_HOST from secrets.h (the host main/server_ca.pem was fetched from). */
 const char *settings_build_host(void);

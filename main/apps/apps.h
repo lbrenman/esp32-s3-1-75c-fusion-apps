@@ -5,6 +5,7 @@
 #include "ui_nav.h"
 
 extern const ui_app_t APP_VOICE;
+extern const ui_app_t APP_TRANSLATE;
 extern const ui_app_t APP_STOCKS;
 extern const ui_app_t APP_SETTINGS;
 

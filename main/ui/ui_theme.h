@@ -25,6 +25,8 @@ bool ui_theme_is_dark(void);
 /* Per-app accent gradients (icon tiles, voice-chat orb) */
 #define UI_C_VOICE_1     0x7C5CFF
 #define UI_C_VOICE_2     0x2F8CFF
+#define UI_C_TRANSLATE_1 0x14B8C8
+#define UI_C_TRANSLATE_2 0x0B7A72
 #define UI_C_SETTINGS_1  0x8E9AAF
 #define UI_C_SETTINGS_2  0x4A5468
 

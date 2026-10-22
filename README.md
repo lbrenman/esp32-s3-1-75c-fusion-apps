@@ -1,11 +1,11 @@
 # esp32-s3-1-75c-fusion-apps — App launcher for the ESP32-S3-Touch-AMOLED-1.75C
 
 A small "watch OS" for the Waveshare **ESP32-S3-Touch-AMOLED-1.75C**: a home screen with a clock and
-app icons, a **Voice chat** app (client for the Amplify Fusion WebSocket voice server: say "Jarvis" or
+app icons, a **Voice chat** app (client for the [Amplify Fusion WebSocket voice server](https://github.com/lbrenman/Amplify-Fusion-AI-Voice-Chat-Demo-Using-Mistral): say "Jarvis" or
 hold to talk),
-a **Translator** app (push-to-talk voice translator for the Amplify Fusion translator server: speak
+a **Translator** app (push-to-talk voice translator for the [Amplify Fusion translator server](https://github.com/lbrenman/GitHubAmplify-Fusion-Voice-Translation-and-Transcription-Demo-Using-Mistral-and-AWS-Translate): speak
 English, hear Spanish; also shows Hindi, Arabic and Russian text),
-a **Stocks** app (watchlist client for the FusionStockWatchListMCP server, an Amplify Fusion MCP
+a **Stocks** app (watchlist client for the [FusionStockWatchListMCP server](https://github.com/lbrenman/Amplify-Fusion-Stock-Watch-List-MCP), an Amplify Fusion MCP
 server) and a **Settings** app. Day and night themes, Font Awesome icons, slide transitions.
 
 ![Screens](docs/screenshots/overview.png)

@@ -83,3 +83,13 @@
 #define DEFAULT_TR_TARGET      "es"
 #define TR_PATH                "/translate"  /* added to the base URL */
 #define TR_AUDIO_WAIT_MS       15000         /* TRANSLATION announced audio: give up waiting after this */
+
+/* Phone settings page (web_settings.c): a small web server on the watch. Open
+ * http://WEB_HOSTNAME.local (or the IP shown in Settings > Phone) on a phone or computer on the same
+ * Wi-Fi, enter the PIN shown in Settings > Phone, and change the same settings as on the watch
+ * (everything except Wi-Fi). Plain HTTP on your own network; the PIN guards it. */
+#define DEFAULT_WEB_SETTINGS   1             /* page on at first boot; Settings > Phone switches it */
+#define WEB_HOSTNAME           "fusion-apps" /* -> http://fusion-apps.local (mDNS) */
+#define WEB_PIN_MAX_TRIES      5             /* wrong PINs in a row before the page locks... */
+#define WEB_PIN_LOCK_S         60            /* ...for this many seconds */
+#define WEB_MAX_SESSIONS       4             /* phones/browsers signed in at once (until reboot or New PIN) */

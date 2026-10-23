@@ -7,6 +7,8 @@ a **Translator** app (push-to-talk voice translator for the [Amplify Fusion tran
 English, hear Spanish; also shows Hindi, Arabic and Russian text),
 a **Stocks** app (watchlist client for the [FusionStockWatchListMCP server](https://github.com/lbrenman/Amplify-Fusion-Stock-Watch-List-MCP), an Amplify Fusion MCP
 server) and a **Settings** app. Day and night themes, Font Awesome icons, slide transitions.
+A **phone settings page** (`http://fusion-apps.local`, PIN-protected) changes the same settings from
+a phone or computer on your Wi-Fi.
 
 ![Screens](docs/screenshots/overview.png)
 
@@ -30,6 +32,11 @@ the device.*
 > headers, but it hasn't been built with `idf.py` or talked to the real server yet.
 > Expect a small fix or two on the first build.
 
+> **The phone settings page is new and untested on the board.** The page is clicked through in a
+> browser against a mock of the watch's API, the Settings screen is checked in `tools/ui_preview`,
+> and the C code is syntax-checked against the ESP-IDF 5.5.2, mdns 1.x and 1.75C BSP 3.0 headers,
+> but it hasn't been built with `idf.py` or opened from a phone yet. Watch the `web` lines in the log.
+
 > **The wake word is new and untested on the board.** The engine code is syntax-checked against
 > the ESP-IDF 5.5.2 and ESP-SR 2.6 headers and the screens are checked in `tools/ui_preview`, but it
 > hasn't been built with `idf.py` or heard anyone say "Jarvis" yet. Watch the `voice` lines in the
@@ -51,7 +58,8 @@ the device.*
 | **Quote** (tap a row in Stocks) | A detailed quote from `GetStockQuote`: price, change, open, previous close and the day's range (low–high with today's price marked). Refresh and remove buttons |
 | **Pick symbols** (+ or swipe left in Stocks) | Tabs of preset symbols (**QQQ 1**, **QQQ 2**, **Blue Chip**) and **Other** (watchlist symbols not on a tab, e.g. added from Claude). Tap to add (green) or remove (gray) |
 | **Stock server** (gear in Stocks) | See and change the MCP server URL and API key, connection status, refresh now, reset URL to `secrets.h` |
-| **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new) and wake word on/off, battery (%, state, voltage), version and free memory, restart, reset |
+| **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new) and wake word on/off, phone settings page (on/off, address, PIN), battery (%, state, voltage), version and free memory, restart, reset |
+| **Phone settings page** (in a browser) | `http://fusion-apps.local` on the same Wi-Fi, after the PIN from Settings > Phone: server URLs and API keys for Voice chat, Translator and Stocks, Translator languages, wake word, new conversation, Stocks auto refresh, dark mode, brightness, volume, battery and memory, restart. Everything except Wi-Fi |
 
 ### Gestures
 
@@ -118,6 +126,64 @@ your request). Everything runs on the board; nothing is sent until you've said t
   for the display, it turns itself off for this visit ("Wake word off: low memory", Settings shows
   "Paused: low memory") and hold to talk keeps working. The log says how much it took.
 - Another built-in word ("Computer", "Hi ESP", "Alexa"...): see "Settings you might change".
+
+### The phone settings page
+
+The watch runs a small web server, so you can change its settings from Safari on your iPhone (or any
+browser on the same Wi-Fi) instead of typing URLs and API keys on the round screen. Everything works
+as before on the watch; the page is a second way to change the same settings.
+
+1. On the watch: **Settings > Phone**. **Settings page** is on by default; the section shows the
+   address (`fusion-apps.local`), the **PIN** (6 digits) and the IP address.
+2. On the phone, on the same Wi-Fi: open `http://fusion-apps.local` (or `http://<IP address>`).
+3. Enter the PIN. The browser stays signed in until the watch restarts or you make a new PIN.
+
+| On the page | What it changes |
+| --- | --- |
+| Voice chat | Server URL, API key, wake word on/off, **New conversation** |
+| Translator | From / Into languages (with Swap), server base URL, API key |
+| Stocks | Auto refresh, **Refresh now**, MCP server URL, API key |
+| Display and sound | Dark mode, brightness, volume |
+| Watch | Wi-Fi name and signal, battery, free memory, version, **Restart watch**, **Sign out** |
+
+- **Same settings, same effect.** A change from the page is saved to the same place (NVS) as one made
+  on the watch and applied the same way: a new Voice chat URL reconnects Voice chat if it's open, new
+  languages reconnect the Translator after a translation still on its way, a new Stocks URL reloads
+  Stocks, dark mode repaints the watch. The watch shows "Changed from your phone", and the Settings
+  screen shows the new values if it's open.
+- **Wi-Fi stays on the watch**, because the page only works once the watch is on your Wi-Fi.
+- **API keys are write-only.** The page shows only "Saved, ends in abcd" (the same last 4 characters
+  the watch shows); typing a new key replaces it. Nothing secret is logged.
+- **"Use secrets.h URL"** appears under a URL that differs from the one in `secrets.h`.
+- The page refreshes the status every 5 s while it's open.
+
+Security, on your own network:
+
+- The **PIN** is made on first boot and kept on the watch. **Settings > Phone > PIN** makes a new one,
+  which signs out every browser. **Reset settings** also makes a new one.
+- `WEB_PIN_MAX_TRIES` (5) wrong PINs in a row lock the page for `WEB_PIN_LOCK_S` (60 s).
+- Up to `WEB_MAX_SESSIONS` (4) browsers can be signed in at once. Sign-ins live in RAM: a restart
+  signs everyone out.
+- The page is plain **HTTP**, so what you type (including a new API key) crosses your Wi-Fi
+  unencrypted, like any device's local setup page. Use it on a network you trust, or switch it off:
+  **Settings > Phone > Settings page** off stops the web server and the `fusion-apps.local` name.
+- Requests that change something need a header only the page sends (`X-Fusion-Apps: 1`) and a
+  `SameSite=Strict` cookie, so another website can't change the watch through your browser.
+
+Memory: the web server task and its buffers live in PSRAM, and mDNS keeps its task and memory in
+PSRAM (`CONFIG_MDNS_*_SPIRAM` in `sdkconfig.defaults`), so the page costs very little internal RAM.
+The log line `web: Phone settings page on: http://fusion-apps.local (internal RAM free NN KB)` shows
+what's left; compare **Settings > System** with the page on and off if the display ever complains.
+
+The API, for scripts (all JSON; POSTs need `X-Fusion-Apps: 1`, and all but login need the cookie):
+
+| Request | Body | Does |
+| --- | --- | --- |
+| `GET /api/state` | | Settings (keys masked), `secrets.h` URLs, status, language list |
+| `POST /api/login` | `{"pin":"123456"}` | Sets the `fa_sid` session cookie |
+| `POST /api/logout` | `{}` | Ends this session |
+| `POST /api/settings` | Any of `ws_url`, `ws_key`, `wake_word`, `tr_url`, `tr_key`, `tr_src` + `tr_dst` (together), `mcp_url`, `mcp_key`, `stocks_auto`, `dark_mode`, `brightness` (5-100), `volume` (0-100) | Changes only the fields sent; unknown names are an error |
+| `POST /api/action` | `{"action":"new_conversation"}`, `"stocks_refresh"` or `"restart"` | |
 
 ### The server connection
 
@@ -320,6 +386,8 @@ URL that already ends in `/translate` isn't doubled, and one ending in `/speech`
 If the translator is on a different host than `WS_HOST`, it's checked against ESP-IDF's built-in CA
 bundle instead of `main/server_ca.pem`. Values already saved on the device win over `secrets.h` until **Settings > Reset settings**.
 
+- The phone settings page (`http://fusion-apps.local`) changes the same saved values; see
+  "The phone settings page".
 - **Settings > Reset settings** goes back to the `secrets.h` values.
 - `idf.py erase-flash` also clears them.
 - Secrets are never printed to the serial log and are shown masked on screen (`••••••••abcd`).
@@ -335,7 +403,7 @@ esp32-s3-1-75c-fusion-apps/
 ├── sdkconfig.fusion_apps          just this project's settings, for reference
 ├── components/bsp_extra/          Waveshare's audio helper (codec, I2S, speaker amp)
 ├── main/
-│   ├── app_main.c                 boot: settings -> display -> battery -> UI -> audio -> stocks engine -> Wi-Fi
+│   ├── app_main.c                 boot: settings -> display -> battery -> UI -> audio -> stocks engine -> Wi-Fi -> phone page
 │   ├── app_config.h               compiled-in options: time zone, 12/24 h clock, animation time...
 │   ├── settings_store.c/.h        settings in NVS, defaults from secrets.h
 │   ├── net.c/.h                   Wi-Fi station, scanning, NTP clock
@@ -345,6 +413,8 @@ esp32-s3-1-75c-fusion-apps/
 │   ├── text_deva_map.h            Hindi pre-shaped sequences (generated with the fonts)
 │   ├── power.c/.h                 battery level and charging from the AXP2101 power chip
 │   ├── display_start.c/.h         starts display + touch + LVGL like the BSP, with smaller draw bands
+│   ├── web_settings.c/.h          phone settings page: HTTP server, PIN sign-in, JSON API, mDNS name
+│   ├── web/settings.html          the page itself (compiled in; no external files)
 │   ├── secrets.h.example          copy to secrets.h (gitignored)
 │   ├── minimp3.h, minimp3_impl.c  MP3 decoder (CC0)
 │   ├── ui/
@@ -537,6 +607,7 @@ open shots/contact_sheet.png
 Change the fake values in `stubs.c` or the click-through script in `sim.c` to preview other states.
 The Stocks screens use a fake watchlist (`stocks_fake_load()` in `stubs.c`); shots `40_` to `59_`.
 The Translator screens are shots `70_` to `92_` (fake translations set in `sim.c`).
+Settings > Phone (the phone settings page's switch, address and PIN) is shots `15e_` to `15i_`.
 
 ## Test the Stocks parsing on your Mac
 
@@ -573,6 +644,8 @@ make                      # first run clones cJSON; prints "N checks, 0 failed"
 | `app_config.h` | `DEFAULT_STOCKS_AUTO` | 1 (auto refresh on, first boot) |
 | `app_config.h` | `MCP_DEBUG` | 0; 1 logs the first 300 bytes of each MCP reply |
 | `apps/app_stocks.c` | `GROUPS` (Pick tabs, up to 25 symbols each) | QQQ 1, QQQ 2, Blue Chip |
+| `app_config.h` | `DEFAULT_WEB_SETTINGS`, `WEB_HOSTNAME` | on (first boot), `fusion-apps` (-> `fusion-apps.local`) |
+| `app_config.h` | `WEB_PIN_MAX_TRIES`, `WEB_PIN_LOCK_S`, `WEB_MAX_SESSIONS` | 5, 60 s, 4 |
 | `ui/ui_theme.c` | palette colors | |
 
 ## Protocol
@@ -662,7 +735,7 @@ rm sdkconfig && idf.py -p /dev/cu.usbmodem1101 build flash monitor
 ## Troubleshooting
 
 Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app`, `settings`,
-`net`, `voice`, `stocks`, `mcp`, `power` (ESP-SR's own lines: `AFE`, `MODEL_LOADER`).
+`net`, `voice`, `stocks`, `mcp`, `power`, `web` (ESP-SR's own lines: `AFE`, `MODEL_LOADER`).
 
 | Symptom / log | Likely cause | Fix |
 | --- | --- | --- |
@@ -706,4 +779,11 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app
 | Pick: a button stays green after a remove | The server had the symbol twice and removed one copy | Tap it again |
 | Pick: "Still loading the watchlist..." | Taps wait until the symbol list has loaded once | Wait for the status line to show the count |
 | A name shows ' where the real one has ’ (e.g. an iPhone hotspot "Leor's iPhone") | The built-in fonts are ASCII-only, so Wi-Fi names, stock names and voice replies are shown with ASCII look-alikes (the Translator has its own accented fonts) | Nothing to fix: the real name is what's saved and joined |
+| Phone: `fusion-apps.local` doesn't open | The phone isn't on the same Wi-Fi, the page is off, or the network blocks mDNS (some guest and mesh networks) | Check **Settings > Phone**; use the IP address shown there instead |
+| Phone: "Can't reach the watch" | The watch restarted, left Wi-Fi, or the page was switched off | Check **Settings > Phone** on the watch, then reload the page |
+| Phone: asks for the PIN again | The watch restarted, or a new PIN was made | Enter the PIN shown in **Settings > Phone** |
+| Phone: "Too many wrong PINs" | 5 wrong PINs in a row | Wait 60 s (`WEB_PIN_LOCK_S`) |
+| Settings > Phone: "Didn't start: see the log" | The web server couldn't start (log: `web: Web server didn't start`) | Usually out of sockets or memory; restart the watch |
+| Phone: "The watch is busy - try again" | The watch's screen task was busy for more than 2 s | Try again |
+| Build: `mdns.h: No such file` | The mdns component wasn't downloaded | `idf.py reconfigure` (it's in `main/idf_component.yml`) |
 | No battery level on Home | The AXP2101 didn't answer on I2C (`power:` lines in the log) | Check the log line; the rest of the app works without it |

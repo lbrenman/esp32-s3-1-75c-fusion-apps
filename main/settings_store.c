@@ -63,6 +63,22 @@ static void make_uuid(char *out /* SET_CONV_LEN + 1 bytes */)
              b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
 }
 
+static void make_pin(char *out /* SET_PIN_LEN + 1 bytes */)
+{
+    /* 6 random digits; 100000-999999 so it never starts with 0 (easier to read out) */
+    uint32_t n = 100000 + esp_random() % 900000;
+    snprintf(out, SET_PIN_LEN + 1, "%06u", (unsigned)n);
+}
+
+static bool pin_ok(const char *pin)
+{
+    if (strlen(pin) != SET_PIN_LEN) return false;
+    for (int i = 0; i < SET_PIN_LEN; i++) {
+        if (pin[i] < '0' || pin[i] > '9') return false;
+    }
+    return true;
+}
+
 static void load_defaults(app_settings_t *s)
 {
     memset(s, 0, sizeof(*s));
@@ -81,6 +97,8 @@ static void load_defaults(app_settings_t *s)
     strlcpy(s->tr_api_key, TRANSLATE_API_KEY, sizeof(s->tr_api_key));
     strlcpy(s->tr_src, TRANSLATE_SOURCE_LANG, sizeof(s->tr_src));
     strlcpy(s->tr_dst, TRANSLATE_TARGET_LANG, sizeof(s->tr_dst));
+    s->web_enabled = DEFAULT_WEB_SETTINGS;
+    /* web_pin stays empty: settings_init() makes one */
 }
 
 static void get_str(nvs_handle_t h, const char *key, char *dst, size_t cap)
@@ -114,6 +132,7 @@ void settings_init(void)
         uint8_t dark = s_cur.dark_mode;
         uint8_t stk_auto = s_cur.stocks_auto;
         uint8_t wake = s_cur.wake_word;
+        uint8_t web = s_cur.web_enabled;
         get_str(h, "ssid",   s_cur.wifi_ssid,  sizeof(s_cur.wifi_ssid));
         get_str(h, "pass",   s_cur.wifi_pass,  sizeof(s_cur.wifi_pass));
         get_str(h, "url",    s_cur.ws_url,     sizeof(s_cur.ws_url));
@@ -130,9 +149,12 @@ void settings_init(void)
         get_str(h, "trkey",  s_cur.tr_api_key, sizeof(s_cur.tr_api_key));
         get_str(h, "trsrc",  s_cur.tr_src,     sizeof(s_cur.tr_src));
         get_str(h, "trdst",  s_cur.tr_dst,     sizeof(s_cur.tr_dst));
+        get_u8(h, "web",    &web);
+        get_str(h, "webpin", s_cur.web_pin,    sizeof(s_cur.web_pin));
         s_cur.dark_mode = dark != 0;
         s_cur.stocks_auto = stk_auto != 0;
         s_cur.wake_word = wake != 0;
+        s_cur.web_enabled = web != 0;
         nvs_close(h);
         ESP_LOGI(TAG, "Loaded saved settings");
     } else {
@@ -148,6 +170,19 @@ void settings_init(void)
     } else {
         ESP_LOGI(TAG, "Conversation %s", s_cur.conversation_id);
     }
+    /* the phone settings page's PIN: made once, kept until "New PIN" or a reset (never logged) */
+    if (!pin_ok(s_cur.web_pin)) settings_new_web_pin(NULL, 0);
+}
+
+esp_err_t settings_new_web_pin(char *out, size_t out_len)
+{
+    app_settings_t s;
+    settings_get(&s);
+    make_pin(s.web_pin);
+    esp_err_t err = settings_set(&s);
+    ESP_LOGI(TAG, "New phone settings PIN made");
+    if (out && out_len) strlcpy(out, s.web_pin, out_len);
+    return err;
 }
 
 esp_err_t settings_new_conversation(char *out, size_t out_len)
@@ -199,6 +234,8 @@ esp_err_t settings_set(const app_settings_t *in)
     if (strcmp(old.tr_api_key, in->tr_api_key)) err |= nvs_set_str(h, "trkey", in->tr_api_key);
     if (strcmp(old.tr_src, in->tr_src))         err |= nvs_set_str(h, "trsrc", in->tr_src);
     if (strcmp(old.tr_dst, in->tr_dst))         err |= nvs_set_str(h, "trdst", in->tr_dst);
+    if (old.web_enabled != in->web_enabled)     err |= nvs_set_u8(h, "web", in->web_enabled ? 1 : 0);
+    if (strcmp(old.web_pin, in->web_pin))       err |= nvs_set_str(h, "webpin", in->web_pin);
     err |= nvs_commit(h);
     nvs_close(h);
 
@@ -219,5 +256,6 @@ esp_err_t settings_reset(void)
     xSemaphoreGive(s_mtx);
     ESP_LOGI(TAG, "Settings reset to defaults");
     settings_new_conversation(NULL, 0);    /* a reset also starts a new conversation */
+    settings_new_web_pin(NULL, 0);         /* ...and makes a new phone settings PIN */
     return ESP_OK;
 }

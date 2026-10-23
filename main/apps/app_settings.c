@@ -1,4 +1,5 @@
-/* Settings app: Wi-Fi (scan + password), display (dark mode, brightness), sound, about, reset. */
+/* Settings app: Wi-Fi (scan + password), display (dark mode, brightness), sound, voice chat,
+ * phone settings page, about, reset. */
 
 #include <stdio.h>
 #include <string.h>
@@ -15,6 +16,7 @@
 #include "app_config.h"
 #include "text_ascii.h"
 #include "power.h"
+#include "web_settings.h"
 
 static lv_obj_t   *s_scr;
 static lv_obj_t   *s_list;
@@ -26,6 +28,7 @@ static lv_timer_t *s_timer;
 static int32_t     s_keep_scroll = -1;   /* restore the scroll position after a theme rebuild */
 
 static void refresh_wake_row(void);
+static void refresh_web_rows(void);
 
 /* ---------------------------------------------------------------- helpers */
 /* A Wi-Fi name as the font can show it ("Leor Brenman’s iPhone" -> "Leor Brenman's iPhone").
@@ -113,6 +116,7 @@ static void tick_cb(lv_timer_t *t)
     refresh_rows();
     if (s_scr) refresh_system_rows();
     refresh_wake_row();
+    refresh_web_rows();
 }
 
 static void delete_cb(lv_event_t *e)
@@ -411,6 +415,8 @@ static void do_reset(void *user)
     bsp_display_brightness_set(cfg.brightness);
     voice_set_volume(cfg.volume);
     voice_set_wake_word(cfg.wake_word);
+    web_settings_sign_out_all();           /* the reset made a new PIN */
+    web_settings_set_enabled(cfg.web_enabled);
     net_reconnect();
     voice_reconnect();
     stocks_set_auto(cfg.stocks_auto);
@@ -426,6 +432,91 @@ static void reset_cb(lv_event_t *e)
     ui_confirm("Reset settings?",
                "Wi-Fi, server and display settings go back to the values in secrets.h.",
                "Reset", true, do_reset, NULL);
+}
+
+/* ------------------------------------------------------- phone settings page */
+static ui_toggle_row_t s_web_row;
+static ui_row_t        s_web_addr_row;
+static ui_row_t        s_web_ip_row;
+static ui_row_t        s_web_pin_row;
+
+static void pin_text(char *buf, size_t len)
+{
+    app_settings_t cfg;
+    settings_get(&cfg);
+    snprintf(buf, len, "%.3s %.3s", cfg.web_pin, strlen(cfg.web_pin) > 3 ? cfg.web_pin + 3 : "");
+}
+
+static void refresh_web_rows(void)
+{
+    if (!s_scr || !s_web_row.value) return;
+    app_settings_t cfg;
+    settings_get(&cfg);
+    bool on = cfg.web_enabled;
+    char buf[48];
+    uint32_t c = UI_C_GRAY;
+    if (!on) {
+        snprintf(buf, sizeof(buf), "Off");
+    } else if (!web_settings_running()) {
+        snprintf(buf, sizeof(buf), "Didn't start: see the log");
+        c = UI_C_RED;
+    } else if (!net_is_up()) {
+        snprintf(buf, sizeof(buf), "Waiting for Wi-Fi");
+        c = UI_C_ORANGE;
+    } else {
+        int n = web_settings_sessions();
+        if (n) snprintf(buf, sizeof(buf), "On \xE2\x80\xA2 %d signed in", n);
+        else   snprintf(buf, sizeof(buf), "On \xE2\x80\xA2 open the address");
+        c = UI_C_BLUE;
+    }
+    lv_label_set_text(s_web_row.value, buf);
+    lv_obj_set_style_bg_color(lv_obj_get_child(s_web_row.row, 0), lv_color_hex(c), 0);
+
+    char ip[20];
+    if (net_ip(ip, sizeof(ip))) snprintf(buf, sizeof(buf), "%s", ip);
+    else                        snprintf(buf, sizeof(buf), "No Wi-Fi yet");
+    lv_label_set_text(s_web_ip_row.value, buf);
+    pin_text(buf, sizeof(buf));
+    lv_label_set_text(s_web_pin_row.value, buf);
+
+    lv_obj_t *rows[] = { s_web_addr_row.row, s_web_ip_row.row, s_web_pin_row.row };
+    for (int i = 0; i < 3; i++) {
+        if (on) lv_obj_remove_flag(rows[i], LV_OBJ_FLAG_HIDDEN);
+        else    lv_obj_add_flag(rows[i], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void web_cb(lv_event_t *e)
+{
+    bool on = lv_obj_has_state(lv_event_get_target_obj(e), LV_STATE_CHECKED);
+    web_settings_set_enabled(on);          /* saves the setting too */
+    refresh_web_rows();
+}
+
+static void do_new_pin(void *user)
+{
+    settings_new_web_pin(NULL, 0);
+    web_settings_sign_out_all();
+    refresh_web_rows();
+    ui_toast("New PIN: sign in again on your phone");
+}
+
+static void new_pin_cb(lv_event_t *e)
+{
+    if (ui_nav_busy()) return;
+    ui_confirm("New PIN?", "Phones and browsers signed in now will have to enter the new PIN.",
+               "New PIN", false, do_new_pin, NULL);
+}
+
+bool app_settings_showing(void)
+{
+    return s_scr && lv_screen_active() == s_scr;
+}
+
+void app_settings_refresh(void)
+{
+    if (app_settings_showing()) s_keep_scroll = lv_obj_get_scroll_y(s_list);
+    ui_nav_refresh();
 }
 
 static lv_obj_t *settings_build(void *arg)
@@ -459,6 +550,12 @@ static lv_obj_t *settings_build(void *arg)
     ui_row(list, ICON_PEN, UI_C_PURPLE, "New conversation", NULL, new_conv_cb, NULL);
     s_wake_row = ui_row_toggle(list, ICON_WAVE, UI_C_PURPLE, "Wake word", "", cfg.wake_word, wake_cb, NULL);
 
+    ui_section(list, "PHONE");
+    s_web_row = ui_row_toggle(list, ICON_MOBILE, UI_C_BLUE, "Settings page", "", cfg.web_enabled, web_cb, NULL);
+    s_web_addr_row = ui_row(list, ICON_LINK, UI_C_TEAL, "Address", web_settings_host(), NULL, NULL);
+    s_web_pin_row = ui_row(list, ICON_LOCK, UI_C_ORANGE, "PIN", "", new_pin_cb, NULL);
+    s_web_ip_row = ui_row(list, ICON_GLOBE, UI_C_TEAL, "Or IP address", "", NULL, NULL);
+
     ui_section(list, "SYSTEM");
     s_batt_row = ui_row(list, ICON_BATTERY_3Q, UI_C_GREEN, "Battery", "", NULL, NULL);
     s_about_row = ui_row(list, ICON_INFO, UI_C_GRAY, APP_NAME " v" APP_VERSION, "", NULL, NULL);
@@ -468,6 +565,7 @@ static lv_obj_t *settings_build(void *arg)
 
     refresh_rows();
     refresh_wake_row();
+    refresh_web_rows();
     if (s_timer) lv_timer_delete(s_timer);
     s_timer = lv_timer_create(tick_cb, 1000, NULL);
     lv_obj_add_event_cb(scr, delete_cb, LV_EVENT_DELETE, NULL);

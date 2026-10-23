@@ -58,3 +58,4 @@ LV_FONT_DECLARE(ui_icons_56)
 #define ICON_LANGUAGE   "\xEF\x86\xAB"   /* U+F1AB */
 #define ICON_SWAP       "\xEF\x83\xAC"   /* U+F0EC */
 #define ICON_ARROW_RIGHT "\xEF\x81\xA1"   /* U+F061 */
+#define ICON_MOBILE     "\xEF\x8F\x8D"   /* U+F3CD */

@@ -7,3 +7,5 @@ dependencies:
   espressif/esp_websocket_client: "^1.2.0"
   # Wake word (WakeNet) and voice activity detection for Voice chat. 2.4.5 fixed esp-dl on the S3.
   espressif/esp-sr: "^2.4.5"
+  # Phone settings page: answers to fusion-apps.local (the web server itself is part of ESP-IDF)
+  espressif/mdns: "^1.8.0"

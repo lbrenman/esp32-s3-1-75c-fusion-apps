@@ -13,3 +13,9 @@ extern const ui_app_t *const g_apps[];
 extern const int g_app_count;
 
 lv_obj_t *home_build(void *arg);
+
+/* Settings app: its main list is the screen showing right now (not a screen opened from it). */
+bool app_settings_showing(void);
+/* Rebuild the current screen (after a theme change, or settings changed from the phone page),
+ * keeping the Settings list's scroll position when it's the one showing. */
+void app_settings_refresh(void);

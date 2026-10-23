@@ -8,6 +8,7 @@
 #include "voice.h"
 #include "stocks.h"
 #include "power.h"
+#include "web_settings.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 
@@ -20,7 +21,8 @@ esp_err_t bsp_display_brightness_set(int p) { printf("brightness %d\n", p); retu
 static app_settings_t s = { "Home-WiFi", "example-password", "wss://voice.example.com:4443/ws/speech",
                             "example-api-key-abcd", 1, 80, 75, "3f2a9c1e-7b4d-4e21-9a6f-0c8d5e11c11e",
                             "https://fusion.example.com:4443/FusionStockWatchListMCP", "example-mcp-key-wxyz", 1, 1,
-                            "wss://fusion.example.com:4443/translator", "example-tr-key-9f3e", "en", "es" };
+                            "wss://fusion.example.com:4443/translator", "example-tr-key-9f3e", "en", "es",
+                            1, "482913" };
 void settings_init(void) {}
 void settings_get(app_settings_t *o) { *o = s; }
 esp_err_t settings_set(const app_settings_t *i) { s = *i; printf("settings saved (dark=%d)\n", s.dark_mode); return 0; }
@@ -28,6 +30,10 @@ esp_err_t settings_reset(void) { return 0; }
 esp_err_t settings_new_conversation(char *out, size_t len) {
     snprintf(s.conversation_id, sizeof(s.conversation_id), "9d81b7aa-1c2e-4f00-8b3a-7e6f2d90a4b2");
     if (out) snprintf(out, len, "%s", s.conversation_id);
+    return 0; }
+esp_err_t settings_new_web_pin(char *out, size_t len) {
+    snprintf(s.web_pin, sizeof(s.web_pin), "730158");
+    if (out) snprintf(out, len, "%s", s.web_pin);
     return 0; }
 const char *settings_default_url(void) { return "wss://example:4443/ws/speech"; }
 const char *settings_build_host(void) { return "example"; }
@@ -207,3 +213,13 @@ void stocks_get(stocks_snapshot_t *o) { *o = g_ss; }
 power_info_t g_power = { true, true, 87, 4012, false, false, false };
 void power_init(void) {}
 void power_get(power_info_t *out) { *out = g_power; }
+
+/* phone settings page (web_settings.c): sim.c sets g_web_sessions */
+int g_web_sessions = 0;
+bool g_web_running = true;
+void web_settings_start(void) {}
+void web_settings_set_enabled(bool on) { s.web_enabled = on; g_web_running = on; printf("web page %s\n", on ? "on" : "off"); }
+bool web_settings_running(void) { return g_web_running; }
+int  web_settings_sessions(void) { return g_web_sessions; }
+void web_settings_sign_out_all(void) { g_web_sessions = 0; printf("web sign out all\n"); }
+const char *web_settings_host(void) { return "fusion-apps.local"; }

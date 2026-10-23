@@ -98,8 +98,9 @@ idf_component_register(SRCS "app_main.c"
                             "apps/stocks_core.c"
                             "apps/stocks_parse.c"
                             "mcp_client.c"
+                            "web_settings.c"
                        INCLUDE_DIRS "." "ui" "apps"
-                       EMBED_TXTFILES "server_ca.pem")
+                       EMBED_TXTFILES "server_ca.pem" "web/settings.html")
 
 # minimp3 is third-party code: don't let its warnings fail the build
 set_source_files_properties(minimp3_impl.c PROPERTIES COMPILE_OPTIONS "-Wno-error;-w")

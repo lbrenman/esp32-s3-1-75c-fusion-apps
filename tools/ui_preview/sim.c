@@ -220,6 +220,31 @@ int main(void)
         printf("wake status after re-enable: %d (1 = on)\n", g_wake_status);
         lv_obj_scroll_to_y(lv_obj_get_parent(row), 0, LV_ANIM_OFF);
     }
+    {   /* phone settings page: on, a phone signed in, New PIN, off */
+        extern int g_web_sessions;
+        lv_obj_t *l = find_text(lv_screen_active(), "Settings page");
+        lv_obj_t *row = lv_obj_get_parent(lv_obj_get_parent(l));
+        lv_obj_t *list = lv_obj_get_parent(row);
+        lv_obj_scroll_to_y(list, lv_obj_get_y(row) - 40, LV_ANIM_OFF);
+        step(1100);
+        shot("15e_settings_phone_on");
+        g_web_sessions = 1;
+        step(1100);
+        shot("15f_settings_phone_signed_in");
+        tap_text("PIN");
+        shot("15g_new_pin_confirm");
+        tap_text("New PIN");
+        step(1100);
+        shot("15h_new_pin");
+        lv_obj_t *wsw = lv_obj_get_child(row, -1);
+        lv_area_t a; lv_obj_get_coords(wsw, &a);
+        tap((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);   /* off */
+        step(1100);
+        shot("15i_settings_phone_off");
+        tap((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);   /* back on */
+        step(1100);
+        lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
+    }
     swipe(233, 120, 233, 400);
     tap_text("Network");
     step(600);

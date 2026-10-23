@@ -13,6 +13,7 @@
 #define SET_KEY_MAX   128
 #define SET_CONV_LEN  36            /* UUID, e.g. 3f2a9c1e-....-c11e */
 #define SET_LANG_MAX  7             /* ISO 639-1 code, e.g. "en" (room for "pt-BR") */
+#define SET_PIN_LEN   6             /* phone settings page PIN, 6 digits */
 
 typedef struct {
     char    wifi_ssid[SET_SSID_MAX + 1];
@@ -31,6 +32,8 @@ typedef struct {
     char    tr_api_key[SET_KEY_MAX + 1];
     char    tr_src[SET_LANG_MAX + 1];     /* Translator: language you speak, e.g. "en" */
     char    tr_dst[SET_LANG_MAX + 1];     /* Translator: language to translate into, e.g. "es" */
+    bool    web_enabled;                  /* phone settings page (web_settings.c) is running */
+    char    web_pin[SET_PIN_LEN + 1];     /* its PIN, shown in Settings on the watch; made on first boot */
 } app_settings_t;
 
 /* Initializes NVS and loads the settings. Call once, first thing in app_main. */
@@ -47,6 +50,9 @@ esp_err_t settings_reset(void);
 
 /* Makes and saves a new conversation ID (copied to out if not NULL). */
 esp_err_t settings_new_conversation(char *out, size_t out_len);
+
+/* Makes and saves a new PIN for the phone settings page (copied to out if not NULL). */
+esp_err_t settings_new_web_pin(char *out, size_t out_len);
 
 /* The server URL built from WS_HOST / WS_PORT / WS_PATH in secrets.h. */
 const char *settings_default_url(void);

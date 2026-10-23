@@ -4,9 +4,11 @@
  *   Home screen ─┬─ Voice chat  (push-to-talk client for the Amplify Fusion voice server)
  *                ├─ Translator  (push-to-talk voice translator, same engine as Voice chat)
  *                ├─ Stocks      (watchlist client for the FusionStockWatchListMCP server)
- *                └─ Settings    (Wi-Fi, dark mode, brightness, volume, reset)
+ *                └─ Settings    (Wi-Fi, dark mode, brightness, volume, phone page, reset)
  *
- * Boot order: settings (NVS) -> display -> battery -> UI -> audio -> stocks engine -> Wi-Fi.
+ * Phone settings page: http://fusion-apps.local on the same Wi-Fi (web_settings.c), PIN in Settings.
+ *
+ * Boot order: settings (NVS) -> display -> battery -> UI -> audio -> stocks engine -> Wi-Fi -> phone page.
  * Apps live in main/apps/, shared UI pieces in main/ui/.
  */
 
@@ -24,6 +26,7 @@
 #include "voice.h"
 #include "stocks.h"
 #include "power.h"
+#include "web_settings.h"
 #include "apps.h"
 #include "ui_theme.h"
 #include "ui_nav.h"
@@ -59,6 +62,7 @@ void app_main(void)
     stocks_init();
 
     net_start();
+    web_settings_start();             /* phone settings page, if switched on (Settings > Phone) */
 
     vTaskDelay(pdMS_TO_TICKS(3000));
     ESP_LOGI(TAG, "Free memory: internal %u KB (largest DMA block %u KB), PSRAM %u KB",

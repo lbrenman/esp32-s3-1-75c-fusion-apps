@@ -13,7 +13,16 @@
 #include "stocks.h"
 #include "power.h"
 
-#define W 466
+#include "board.h"
+#define W BOARD_SCREEN_W
+#define H BOARD_SCREEN_H
+/* The script was written for the 1.75C's 466x466. These place a point the same way the layouts do:
+ * CX: from the horizontal center, TY: from the top, MY: from the vertical center, BY: from the bottom. */
+#define CX(x) ((x) - 233 + W / 2)
+#define TY(y) (y)
+#define MY(y) ((y) + (H - 466) / 2)
+#define BY(y) ((y) + (H - 466))
+static const char *g_dir = "shots";
 extern int64_t g_sim_us;
 extern voice_state_t g_vs;
 extern char g_heard[], g_reply[], g_note[];
@@ -35,8 +44,8 @@ void stocks_fake_finish(void);
 void stocks_bump(void);
 void stocks_fake_detail(bool ok);
 
-static uint16_t fb[W * W];
-static uint8_t  drawbuf[W * W * 2];
+static uint16_t fb[W * H];
+static uint8_t  drawbuf[W * H * 2];
 static int px = 0, py = 0, pressed = 0;
 
 static void flush_cb(lv_display_t *d, const lv_area_t *a, uint8_t *map)
@@ -69,14 +78,21 @@ static void shot(const char *name)
     step(500);
     lv_refr_now(NULL);
     char path[128];
-    snprintf(path, sizeof(path), "shots/%s.ppm", name);
+    snprintf(path, sizeof(path), "%s/%s.ppm", g_dir, name);
     FILE *f = fopen(path, "wb");
-    fprintf(f, "P6\n%d %d\n255\n", W, W);
-    for (int y = 0; y < W; y++) for (int x = 0; x < W; x++) {
+    fprintf(f, "P6\n%d %d\n255\n", W, H);
+    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
         uint16_t c = fb[y * W + x];
         unsigned char rgb[3] = { (c >> 11) << 3, ((c >> 5) & 0x3F) << 2, (c & 0x1F) << 3 };
-        int dx = x - W / 2, dy = y - W / 2;
-        if (dx * dx + dy * dy > (W / 2) * (W / 2)) { rgb[0] = 0x30; rgb[1] = 0x30; rgb[2] = 0x34; }
+        /* outside the panel: a circle, or a rectangle with rounded corners */
+#if BOARD_SCREEN_ROUND
+        int qx = x - W / 2, qy = y - W / 2, r = W / 2;
+#else
+        int r = BOARD_CORNER_RADIUS;
+        int qx = x < r ? r - x : (x >= W - r ? x - (W - 1 - r) : 0);
+        int qy = y < r ? r - y : (y >= H - r ? y - (H - 1 - r) : 0);
+#endif
+        if (qx * qx + qy * qy > r * r) { rgb[0] = 0x30; rgb[1] = 0x30; rgb[2] = 0x34; }
         fwrite(rgb, 1, 3, f);
     }
     fclose(f);
@@ -131,17 +147,18 @@ static void tap_app(const char *name)
         lv_area_t a;
         lv_obj_get_coords(l, &a);
         int cx = (a.x1 + a.x2) / 2;
-        if (cx > 200 && cx < 266) { tap(cx, (a.y1 + a.y2) / 2 - 50); return; }   /* tap the orb */
-        if (cx > 233) swipe(320, 250, 160, 250); else swipe(160, 250, 320, 250);
+        if (cx > W / 2 - 33 && cx < W / 2 + 33) { tap(cx, (a.y1 + a.y2) / 2 - 50); return; }   /* tap the orb */
+        if (cx > W / 2) swipe(CX(320), MY(250), CX(160), MY(250)); else swipe(CX(160), MY(250), CX(320), MY(250));
         step(600);
     }
     printf("!! couldn't bring '%s' to the middle\n", name);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    if (argc > 1) g_dir = argv[1];
     lv_init();
-    lv_display_t *d = lv_display_create(W, W);
+    lv_display_t *d = lv_display_create(W, H);
     lv_display_set_color_format(d, LV_COLOR_FORMAT_RGB565);
     lv_display_set_buffers(d, drawbuf, NULL, sizeof(drawbuf), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(d, flush_cb);
@@ -153,21 +170,21 @@ int main(void)
     ui_theme_init(d, true);
     ui_nav_init(home_build);
     shot("01_home_dark");
-    swipe(320, 250, 160, 250);           /* carousel: next app */
+    swipe(CX(320), MY(250), CX(160), MY(250));           /* carousel: next app */
     step(600);
     shot("01b_home_swiped_translator");
-    swipe(320, 250, 160, 250); step(600);
-    swipe(320, 250, 160, 250); step(600);
+    swipe(CX(320), MY(250), CX(160), MY(250)); step(600);
+    swipe(CX(320), MY(250), CX(160), MY(250)); step(600);
     shot("01c_home_swiped_settings");
-    swipe(320, 250, 160, 250); step(600);  /* past the last: stays on Settings */
+    swipe(CX(320), MY(250), CX(160), MY(250)); step(600);  /* past the last: stays on Settings */
     shot("01d_home_last");
-    for (int i = 0; i < 3; i++) { swipe(160, 250, 320, 250); step(600); }
+    for (int i = 0; i < 3; i++) { swipe(CX(160), MY(250), CX(320), MY(250)); step(600); }
 
     tap_app("Voice chat");
     printf("voice active=%d\n", g_vactive);
     shot("02_voice_ready_dark");
 
-    hold(233, 250);
+    hold(CX(233), MY(250));
     shot("03_voice_listening");
     release();
     shot("04_voice_thinking");
@@ -180,25 +197,25 @@ int main(void)
     shot("07_voice_note");
     g_note[0] = 0; bump();
 
-    swipe(233, 330, 233, 170);           /* swipe up -> voice settings */
+    swipe(CX(233), MY(330), CX(233), MY(170));           /* swipe up -> voice settings */
     printf("after swipe up: g_vs=%d (should be READY, recording cancelled)\n", g_vs);
     shot("08_voice_settings");
     tap_text("Server URL");
     shot("09_editor_url");
-    tap(233 - 130, 52);                  /* x button */
+    tap(CX(233 - 130), TY(52));                  /* x button */
     shot("10_back_to_voice_settings");
     tap_text("API key");
     shot("11_editor_key");
-    tap(233 - 130, 52);
-    swipe(233, 180, 233, 340);           /* swipe down -> voice chat */
+    tap(CX(233 - 130), TY(52));
+    swipe(CX(233), MY(180), CX(233), MY(340));           /* swipe down -> voice chat */
     shot("12_back_to_voice");
-    swipe(330, 250, 120, 250);           /* swipe left -> home */
+    swipe(CX(330), MY(250), CX(120), MY(250));           /* swipe left -> home */
     printf("voice active=%d (should be 0)\n", g_vactive);
     shot("13_home_again");
 
     tap_app("Settings");
     shot("14_settings_dark");
-    swipe(233, 380, 233, 120);           /* scroll */
+    swipe(CX(233), MY(380), CX(233), MY(120));           /* scroll */
     shot("15_settings_scrolled");
     {   /* wake word switch: on, off, and the "low memory" state */
         extern wake_status_t g_wake_status;
@@ -245,17 +262,17 @@ int main(void)
         step(1100);
         lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
     }
-    swipe(233, 120, 233, 400);
+    swipe(CX(233), MY(120), CX(233), MY(400));
     tap_text("Network");
     step(600);
     shot("16_wifi_scan");
     tap_text("Guest-WiFi");
     shot("17_wifi_password");
-    tap(233 - 130, 52);
+    tap(CX(233 - 130), TY(52));
     step(400);
-    swipe(120, 240, 360, 240);           /* swipe right = back */
+    swipe(CX(120), MY(240), CX(360), MY(240));           /* swipe right = back */
     shot("18_settings_back");
-    swipe(233, 330, 233, 230);
+    swipe(CX(233), MY(330), CX(233), MY(230));
     shot("18b_settings_display");
     lv_obj_t *sw = NULL;
     {   /* toggle dark mode switch */
@@ -266,17 +283,17 @@ int main(void)
         tap((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);
     }
     shot("19_settings_light");
-    swipe(233, 380, 233, 100);
+    swipe(CX(233), MY(380), CX(233), MY(100));
     tap_text("Reset settings");
     shot("20_confirm");
     tap_text("Cancel");
-    swipe(120, 240, 360, 240);
+    swipe(CX(120), MY(240), CX(360), MY(240));
     shot("21_home_light");
     tap_app("Voice chat");
     shot("22_voice_light");
-    swipe(233, 330, 233, 170);
+    swipe(CX(233), MY(330), CX(233), MY(170));
     shot("23_voice_settings_light");
-    swipe(330, 250, 120, 250);
+    swipe(CX(330), MY(250), CX(120), MY(250));
     g_net = NET_CONNECTING;
     shot("24_home_light_connecting");
     g_net = NET_UP;
@@ -284,7 +301,7 @@ int main(void)
     /* connection switch */
     ui_theme_set_dark(true); ui_nav_refresh(); step(500);
     tap_app("Voice chat");
-    swipe(233, 330, 233, 170);
+    swipe(CX(233), MY(330), CX(233), MY(170));
     {
         lv_obj_t *l = find_text(lv_screen_active(), "Connection");
         lv_obj_t *row = lv_obj_get_parent(lv_obj_get_parent(l));
@@ -294,18 +311,18 @@ int main(void)
     }
     printf("want after switch tap: %d (should be 0)\n", voice_wants_connection());
     shot("25_voice_settings_disconnected");
-    swipe(233, 180, 233, 340);
+    swipe(CX(233), MY(180), CX(233), MY(340));
     strcpy(g_note, "Disconnected after 3 min idle"); bump();
     shot("26_voice_disconnected");
-    tap(233, 233);
+    tap(CX(233), MY(233));
     g_note[0] = 0; bump();
     printf("want after mic tap: %d (should be 1)\n", voice_wants_connection());
     shot("27_voice_reconnected");
 
     /* new conversation */
-    swipe(233, 330, 233, 170);
+    swipe(CX(233), MY(330), CX(233), MY(170));
     shot("28_voice_settings_buttons");
-    swipe(330, 250, 120, 250);
+    swipe(CX(330), MY(250), CX(120), MY(250));
     tap_app("Settings");
     lv_obj_scroll_to_view_recursive(lv_obj_get_parent(lv_obj_get_parent(find_text(lv_screen_active(), "Conversation"))), LV_ANIM_OFF);
     lv_obj_send_event(lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(find_text(lv_screen_active(), "Conversation")))), LV_EVENT_SCROLL, NULL);
@@ -317,25 +334,25 @@ int main(void)
     shot("31_after_new_conversation");
 
     /* ---- Stocks ---- */
-    swipe(120, 240, 360, 240);           /* Settings -> Home */
+    tap_text(ICON_LEFT);                                 /* Settings -> Home: the back button */
     shot("40_home_apps");
     g_ss.auto_refresh = true;
     tap_app("Stocks");
     shot("41_stocks_loading");
     stocks_fake_load(7);
     shot("42_stocks_watchlist");
-    swipe(233, 360, 233, 200);           /* scroll the list */
+    swipe(CX(233), MY(360), CX(233), MY(200));           /* scroll the list */
     shot("43_stocks_scrolled");
-    swipe(233, 200, 233, 380);
-    tap(163, 410);                       /* auto refresh button -> paused */
+    swipe(CX(233), MY(200), CX(233), MY(380));
+    tap(CX(163), BY(410));                       /* auto refresh button -> paused */
     step(2200);
     shot("44_stocks_paused");
-    tap(163, 410);                       /* back on */
+    tap(CX(163), BY(410));                       /* back on */
     step(2200);
     {   /* long-press the NVDA row */
         lv_obj_t *l = find_text(lv_screen_active(), "NVDA");
-        lv_area_t a; lv_obj_get_coords(l, &a);
-        hold(a.x1 + 100, (a.y1 + a.y2) / 2); step(700); release();
+        if (!l) printf("!! no 'NVDA' on screen\n");
+        else { lv_area_t a; lv_obj_get_coords(l, &a); hold(a.x1 + 100, (a.y1 + a.y2) / 2); step(700); release(); }
     }
     shot("45_stocks_remove_confirm");
     tap_text("Cancel");
@@ -343,14 +360,14 @@ int main(void)
     shot("45b_quote_loading");
     stocks_fake_detail(true);
     shot("45c_quote");
-    swipe(110, 250, 360, 250);           /* swipe right -> back */
+    swipe(CX(110), MY(250), CX(360), MY(250));           /* swipe right -> back */
     step(400);
     tap_text("INTC");
     stocks_fake_detail(false);
     shot("45d_quote_error");
-    swipe(110, 250, 360, 250);
+    swipe(CX(110), MY(250), CX(360), MY(250));
     step(400);
-    swipe(360, 250, 110, 250);           /* swipe left -> Pick */
+    swipe(CX(360), MY(250), CX(110), MY(250));           /* swipe left -> Pick */
     shot("46_pick_qqq1");
     tap_text("NVDA");                    /* listed: remove */
     tap_text("AMZN");                    /* not listed: add */
@@ -363,16 +380,16 @@ int main(void)
     shot("49_pick_other");
     tap_text("Blue Chip");
     shot("50_pick_bluechip");
-    swipe(110, 250, 360, 250);           /* swipe right -> Watchlist */
+    swipe(CX(110), MY(250), CX(360), MY(250));           /* swipe right -> Watchlist */
     step(2500);
     shot("51_stocks_after_pick");
-    tap(303, 410);                       /* gear */
+    tap(CX(303), BY(410));                       /* gear */
     shot("52_stock_server");
     tap_text("API key");
     shot("53_stock_server_key_editor");
-    tap(233 - 130, 52);
+    tap(CX(233 - 130), TY(52));
     step(400);
-    swipe(110, 250, 360, 250);
+    swipe(CX(110), MY(250), CX(360), MY(250));
     g_ss.state = STOCKS_ERROR; strcpy(g_ss.note, "Can't reach the server"); g_ss.updated_us = g_sim_us - 185000000LL;
     stocks_bump();
     shot("54_stocks_error_with_data");
@@ -383,15 +400,15 @@ int main(void)
     ui_theme_set_dark(false); ui_nav_refresh(); step(300);
     stocks_fake_load(7);
     shot("57_stocks_light");
-    swipe(360, 250, 110, 250);
+    swipe(CX(360), MY(250), CX(110), MY(250));
     tap_text("QQQ 1");
     shot("58_pick_light");
-    swipe(110, 250, 360, 250);
+    swipe(CX(110), MY(250), CX(360), MY(250));
     tap_text("AAPL");
     stocks_fake_detail(true);
     shot("58b_quote_light");
-    swipe(110, 250, 360, 250);           /* Quote -> Watchlist */
-    swipe(110, 250, 360, 250);           /* Watchlist -> Home */
+    swipe(CX(110), MY(250), CX(360), MY(250));           /* Quote -> Watchlist */
+    swipe(CX(110), MY(250), CX(360), MY(250));           /* Watchlist -> Home */
     printf("stocks active should be 0 now\n");
     shot("59_home_light_apps");
 
@@ -402,7 +419,7 @@ int main(void)
     shot("70_translator_light");
     ui_theme_set_dark(true); ui_nav_refresh(); step(300);
     shot("71_translator_ready");
-    hold(233, 330);
+    hold(CX(233), MY(330));
     shot("72_translator_listening");
     release();
     shot("73_translator_translating");
@@ -414,7 +431,7 @@ int main(void)
     shot("76_translator_speaking");
     g_vs = VOICE_READY; g_has_replay = true; bump();
     shot("76b_translator_replay_button");
-    tap(233, 406);                       /* Replay */
+    tap(CX(233), BY(406));                       /* Replay */
     printf("after replay tap: g_vs=%d (want 6 SPEAKING)\n", g_vs);
     shot("76c_translator_replaying");
     g_vs = VOICE_READY; bump();
@@ -457,7 +474,7 @@ int main(void)
     g_heard[0] = g_reply[0] = 0; strcpy(g_note, "Server closed the connection (1001: Integration disabled)"); g_vs = VOICE_CONNECTING; bump();
     shot("80_translator_server_closed");
     g_note[0] = 0; g_vs = VOICE_READY; bump();
-    tap(233, 109);                       /* the language bar */
+    tap(CX(233), TY(109));                       /* the language bar */
     shot("81_languages");
     tap_text("From");
     shot("82_picker_from");
@@ -478,23 +495,23 @@ int main(void)
     tap_text("Swap");
     step(300);
     shot("86_languages_swapped");
-    swipe(110, 250, 360, 250);           /* swipe right: back to the Translator */
+    swipe(CX(110), MY(250), CX(360), MY(250));           /* swipe right: back to the Translator */
     step(400);
     shot("87_translator_bar_it_en");
-    swipe(233, 380, 233, 120);           /* swipe up -> server */
+    swipe(CX(233), MY(380), CX(233), MY(120));           /* swipe up -> server */
     printf("after swipe up: g_vs=%d (want READY)\n", g_vs);
     shot("88_translator_server");
     tap_text("API key");
     shot("89_translator_key_editor");
-    tap(233 - 130, 52);
+    tap(CX(233 - 130), TY(52));
     step(400);
-    swipe(233, 120, 233, 380);           /* back down */
+    swipe(CX(233), MY(120), CX(233), MY(380));           /* back down */
     g_vs = VOICE_DISCONNECTED; g_want = false; bump();
     shot("90_translator_disconnected");
-    tap(233, 330);
+    tap(CX(233), MY(330));
     step(300);
     shot("91_translator_reconnected");
-    swipe(120, 300, 360, 300);           /* Home */
+    swipe(CX(120), MY(300), CX(360), MY(300));           /* Home */
     printf("voice active=%d (want 0)\n", g_vactive);
     shot("92_home_four_apps");
 
@@ -510,7 +527,7 @@ int main(void)
     step(1200); shot("63_home_no_battery");
     g_power.battery = true; g_power.usb = true; g_power.charging = true; g_power.percent = 64;
     tap_app("Settings");
-    swipe(233, 400, 233, 60); swipe(233, 400, 233, 60); swipe(233, 400, 233, 60);
+    swipe(CX(233), MY(400), CX(233), MY(60)); swipe(CX(233), MY(400), CX(233), MY(60)); swipe(CX(233), MY(400), CX(233), MY(60));
     step(1200); shot("64_settings_system");
     return 0;
 }

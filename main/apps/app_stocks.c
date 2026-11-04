@@ -452,7 +452,7 @@ static lv_obj_t *watchlist_build(void *arg)
     lv_obj_t *fade = lv_obj_create(scr);
     lv_obj_remove_style_all(fade);
     lv_obj_remove_flag(fade, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(fade, UI_SCREEN_SIZE, 126);
+    lv_obj_set_size(fade, UI_W, 126);
     lv_obj_align(fade, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(fade, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(fade, ui_pal.bg, 0);
@@ -463,6 +463,25 @@ static lv_obj_t *watchlist_build(void *arg)
     lv_obj_set_style_bg_main_stop(fade, 205, 0);
     lv_obj_set_style_bg_grad_stop(fade, 255, 0);
     lv_obj_move_to_index(fade, 1);            /* just above the list, below the header */
+
+    /* On a rectangular screen (2.06) the bottom isn't curved away, so rows would show through the
+     * buttons: a band that fades in behind them, like the top one. */
+    if (!UI_ROUND) {
+        lv_obj_t *bfade = lv_obj_create(scr);
+        lv_obj_remove_style_all(bfade);
+        lv_obj_remove_flag(bfade, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_size(bfade, UI_W, 120);
+        lv_obj_align(bfade, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_set_style_bg_opa(bfade, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(bfade, ui_pal.bg, 0);
+        lv_obj_set_style_bg_grad_color(bfade, ui_pal.bg, 0);
+        lv_obj_set_style_bg_grad_dir(bfade, LV_GRAD_DIR_VER, 0);
+        lv_obj_set_style_bg_main_opa(bfade, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_bg_grad_opa(bfade, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_main_stop(bfade, 0, 0);
+        lv_obj_set_style_bg_grad_stop(bfade, 90, 0);
+        lv_obj_move_to_index(bfade, 2);
+    }
 
     w.status = ui_label(scr, &lv_font_montserrat_14, ui_pal.text_dim, "");
     lv_obj_set_width(w.status, 270);

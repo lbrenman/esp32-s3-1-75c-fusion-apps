@@ -2,16 +2,21 @@
 # clicks/swipes through the screens, and saves screenshots to shots/.
 #
 #   cd tools/ui_preview
-#   make            # first run clones and builds LVGL (~1 min), then writes shots/*.png
-#   make clean      # remove the build (keeps the LVGL clone)
+#   make                # 1.75C (round 466x466): first run clones and builds LVGL (~1 min), writes shots/*.png
+#   make BOARD=2_06     # 2.06 (410x502, rounded corners): writes shots_2_06/*.png
+#   make clean          # remove the build (keeps the LVGL clone)
 #
 # Needs: a C compiler (Xcode command line tools), git, python3. PNGs need Pillow
 # (pip3 install pillow); without it you get .ppm files, which Preview also opens.
 
+BOARD    ?= 1_75c
 LVGL_TAG := v9.5.0
 LVGL     := lvgl
 MAIN     := ../../main
 CFLAGS   := -O1 -g -I. -Istub -I$(LVGL) -DLV_CONF_INCLUDE_SIMPLE -Wno-unused-parameter
+BOARD_INC := ../../boards/$(BOARD)/board_bsp/include
+SHOTS    := $(if $(filter 1_75c,$(BOARD)),shots,shots_$(BOARD))
+SIM      := sim_$(BOARD)
 UI_SRCS  := $(MAIN)/ui/ui_theme.c $(MAIN)/ui/ui_nav.c $(MAIN)/ui/ui_widgets.c \
             $(wildcard $(MAIN)/ui/ui_icons_*.c) \
             $(MAIN)/apps/apps.c $(MAIN)/apps/app_home.c $(MAIN)/apps/app_settings.c $(MAIN)/apps/app_voice.c \
@@ -33,14 +38,14 @@ liblvgl.a: | $(LVGL)
 	done | xargs -P 8 -I{} sh -c '{}'
 	ar rcs $@ obj/*.o
 
-sim: liblvgl.a sim.c stubs.c $(UI_SRCS) $(wildcard $(MAIN)/ui/*.h $(MAIN)/apps/*.h $(MAIN)/*.h)
-	$(CC) $(CFLAGS) -Wall -Wno-missing-field-initializers -I$(MAIN) -I$(MAIN)/ui -I$(MAIN)/apps \
-	    -o $@ sim.c stubs.c $(UI_SRCS) liblvgl.a -lm
+$(SIM): liblvgl.a sim.c stubs.c $(UI_SRCS) $(wildcard $(MAIN)/ui/*.h $(MAIN)/apps/*.h $(MAIN)/*.h $(BOARD_INC)/*.h)
+	$(CC) $(CFLAGS) -Wall -Wno-missing-field-initializers -I$(MAIN) -I$(MAIN)/ui -I$(MAIN)/apps -I$(BOARD_INC) \
+	    -DAPP_BOARD_$(shell echo $(BOARD) | tr a-z A-Z)=1 -o $@ sim.c stubs.c $(UI_SRCS) liblvgl.a -lm
 
-shots: sim
-	@rm -rf shots && mkdir -p shots
-	./sim | grep -v "^\[Warn\]"
-	@python3 to_png.py || echo "(Pillow not installed: screenshots left as .ppm)"
+shots: $(SIM)
+	@rm -rf $(SHOTS) && mkdir -p $(SHOTS)
+	./$(SIM) $(SHOTS) | grep -v "^\[Warn\]"
+	@python3 to_png.py $(SHOTS) || echo "(Pillow not installed: screenshots left as .ppm)"
 
 clean:
-	rm -rf obj liblvgl.a sim shots
+	rm -rf obj liblvgl.a sim sim_* shots shots_*

@@ -3,7 +3,7 @@
 #include "ui_widgets.h"
 #include "ui_nav.h"
 
-#define CENTER (UI_SCREEN_SIZE / 2)
+#define CENTER_Y (UI_H / 2)
 
 /* ------------------------------------------------------------------ basics */
 static void plain(lv_obj_t *o)
@@ -54,6 +54,19 @@ lv_obj_t *ui_round_button(lv_obj_t *parent, const char *icon, const lv_font_t *i
     return b;
 }
 
+lv_obj_t *ui_status_ring(lv_obj_t *parent, int border)
+{
+    lv_obj_t *r = lv_obj_create(parent);
+    lv_obj_remove_style_all(r);
+    lv_obj_set_size(r, UI_W - 6, UI_H - 6);
+    lv_obj_center(r);
+    lv_obj_set_style_radius(r, UI_ROUND ? LV_RADIUS_CIRCLE : BOARD_CORNER_RADIUS - 3, 0);
+    lv_obj_set_style_border_width(r, border, 0);
+    lv_obj_set_style_border_color(r, lv_color_hex(0x555555), 0);
+    lv_obj_remove_flag(r, LV_OBJ_FLAG_CLICKABLE);
+    return r;
+}
+
 lv_obj_t *ui_orb(lv_obj_t *parent, int size, uint32_t c1, uint32_t c2, const char *icon,
                  const lv_font_t *icon_font)
 {
@@ -79,7 +92,7 @@ lv_obj_t *ui_orb(lv_obj_t *parent, int size, uint32_t c1, uint32_t c2, const cha
 
 /* ------------------------------------------------------------- list screen */
 
-/* Rows fade out as they scroll toward the curved top and bottom edges. */
+/* Rows fade out as they scroll toward the top and bottom edges (curved on the round screen). */
 static void list_fade(lv_obj_t *list)
 {
     uint32_t n = lv_obj_get_child_count(list);
@@ -88,10 +101,11 @@ static void list_fade(lv_obj_t *list)
         lv_area_t a;
         lv_obj_get_coords(c, &a);
         int32_t cy = (a.y1 + a.y2) / 2;
-        int32_t d = LV_ABS(cy - CENTER);
+        int32_t d = LV_ABS(cy - CENTER_Y);
         lv_opa_t opa = LV_OPA_COVER;
-        if (d > 130) {
-            int32_t v = 255 - (d - 130) * 215 / 100;
+        const int32_t keep = CENTER_Y - 103;          /* fully visible this close to the middle */
+        if (d > keep) {
+            int32_t v = 255 - (d - keep) * 215 / 100;
             opa = (lv_opa_t)LV_CLAMP(30, v, 255);
         }
         if (lv_obj_get_style_opa(c, 0) != opa) lv_obj_set_style_opa(c, opa, 0);
@@ -125,7 +139,7 @@ static lv_obj_t *edge_fade(lv_obj_t *scr, bool top, int h)
 {
     lv_obj_t *f = lv_obj_create(scr);
     plain(f);
-    lv_obj_set_size(f, UI_SCREEN_SIZE, h);
+    lv_obj_set_size(f, UI_W, h);
     lv_obj_align(f, top ? LV_ALIGN_TOP_MID : LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_opa(f, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(f, ui_pal.bg, 0);
@@ -144,7 +158,7 @@ lv_obj_t *ui_list_screen(lv_obj_t **out_screen, const char *title, bool back)
 
     lv_obj_t *list = lv_obj_create(scr);
     lv_obj_remove_style_all(list);
-    lv_obj_set_size(list, UI_LIST_WIDTH + 8, UI_SCREEN_SIZE);
+    lv_obj_set_size(list, UI_LIST_WIDTH + 8, UI_H);
     lv_obj_center(list);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -410,7 +424,7 @@ void ui_confirm(const char *title, const char *msg, const char *ok_text, bool da
 {
     lv_obj_t *ov = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(ov);
-    lv_obj_set_size(ov, UI_SCREEN_SIZE, UI_SCREEN_SIZE);
+    lv_obj_set_size(ov, UI_W, UI_H);
     lv_obj_set_style_bg_color(ov, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(ov, LV_OPA_60, 0);
     lv_obj_add_flag(ov, LV_OBJ_FLAG_CLICKABLE);       /* blocks touches to the screen below */

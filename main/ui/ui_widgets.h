@@ -1,5 +1,6 @@
 #pragma once
-/* Shared building blocks for the round 466x466 screen: list screens with a header,
+/* Shared building blocks for the screen (round 466x466 on the 1.75C, 410x502 with rounded corners
+ * on the 2.06; see board.h): list screens with a header,
  * iOS-style rows, a text editor with keyboard, toasts and confirm dialogs.
  * All functions run in the LVGL task. */
 
@@ -9,8 +10,13 @@
 #include "ui_theme.h"
 #include "ui_icons.h"
 
-#define UI_SCREEN_SIZE 466
-#define UI_LIST_WIDTH  340
+#include "board.h"
+
+#define UI_W           BOARD_SCREEN_W
+#define UI_H           BOARD_SCREEN_H
+#define UI_ROUND       BOARD_SCREEN_ROUND          /* 1: a circle, 0: a rectangle with rounded corners */
+#define UI_LIST_WIDTH  (UI_ROUND ? 340 : UI_W - 40) /* rows and cards */
+#define UI_EXTRA_H     (UI_H - 466)                 /* extra height over the 1.75C's 466 (36 on the 2.06) */
 
 lv_obj_t *ui_screen(void);
 lv_obj_t *ui_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t color, const char *text);
@@ -19,6 +25,10 @@ lv_obj_t *ui_icon(lv_obj_t *parent, const lv_font_t *font, lv_color_t color, con
 /* Round button with an icon. */
 lv_obj_t *ui_round_button(lv_obj_t *parent, const char *icon, const lv_font_t *icon_font,
                           int size, lv_color_t bg, lv_color_t fg);
+
+/* The colored status ring around the edge of the screen (Voice chat, Translator): a circle on
+ * a round screen, a rounded rectangle that follows the corners on the 2.06. */
+lv_obj_t *ui_status_ring(lv_obj_t *parent, int border);
 
 /* Gradient circle with a big icon (Home tiles, voice-chat orb). */
 lv_obj_t *ui_orb(lv_obj_t *parent, int size, uint32_t c1, uint32_t c2, const char *icon,

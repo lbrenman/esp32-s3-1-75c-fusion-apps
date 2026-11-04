@@ -10,17 +10,26 @@
  * lines need only small blocks.
  *
  * Everything else is the BSP's own code path: bsp_display_new() (SPI bus, CO5300 panel),
- * bsp_touch_new(), the LVGL adapter, the same rounder (the CO5300 wants even coordinates).
+ * bsp_touch_new(), the LVGL glue, the same rounder (the CO5300 wants even coordinates).
+ * Two versions, one per board (BOARD in the top CMakeLists.txt):
+ *   1.75C  the BSP uses Espressif's LVGL adapter (esp_lv_adapter)
+ *   2.06   the BSP uses esp_lvgl_port. Its own bsp_display_start() takes the band height from
+ *          Kconfig and allocates a single buffer; here it's double-buffered like on the 1.75C.
  */
 
 #include "esp_log.h"
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
 #include "bsp/touch.h"
+#if APP_BOARD_2_06
+#include "esp_lvgl_port.h"
+#else
 #include "esp_lv_adapter.h"
+#endif
 
 #include "display_start.h"
 #include "app_config.h"
+#include "board.h"
 
 #define TAG "display"
 
@@ -34,6 +43,70 @@ static void rounder_event_cb(lv_event_t *e)
     area->y2 = ((area->y2 >> 1) << 1) + 1;
 }
 
+#if APP_BOARD_2_06
+/* ---------------------------------------------------------------- ESP32-S3-Touch-AMOLED-2.06 */
+lv_display_t *app_display_start(void)
+{
+    lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    port_cfg.task_stack = 8 * 1024;            /* the UI builds whole screens in this task */
+    if (lvgl_port_init(&port_cfg) != ESP_OK) {
+        ESP_LOGE(TAG, "LVGL port init failed");
+        return NULL;
+    }
+
+    esp_lcd_panel_handle_t panel = NULL;
+    esp_lcd_panel_io_handle_t io = NULL;
+    const bsp_display_config_t disp_config = {
+        .max_transfer_sz = BSP_LCD_H_RES * BSP_LCD_V_RES * BSP_LCD_BITS_PER_PIXEL / 8,
+    };
+    if (bsp_display_new(&disp_config, &panel, &io) != ESP_OK) {
+        ESP_LOGE(TAG, "Display panel init failed");
+        return NULL;
+    }
+
+    const lvgl_port_display_cfg_t disp_cfg = {
+        .io_handle = io,
+        .panel_handle = panel,
+        .buffer_size = BSP_LCD_H_RES * APP_LVGL_BUF_LINES,
+        .double_buffer = true,
+        .hres = BSP_LCD_H_RES,
+        .vres = BSP_LCD_V_RES,
+        .monochrome = false,
+        .color_format = LV_COLOR_FORMAT_RGB565,
+        .rotation = { .swap_xy = false, .mirror_x = false, .mirror_y = false },
+        .flags = {
+            .buff_dma = false,
+            .buff_spiram = true,               /* bands in PSRAM; the SPI driver copies each to DMA RAM */
+            .sw_rotate = false,
+            .swap_bytes = true,                /* the CO5300 wants big-endian RGB565 (as in the BSP) */
+        },
+    };
+    lv_display_t *disp = lvgl_port_add_disp(&disp_cfg);
+    if (!disp) {
+        ESP_LOGE(TAG, "Could not register the display with LVGL");
+        return NULL;
+    }
+    lv_display_add_event_cb(disp, rounder_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
+
+    esp_lcd_touch_handle_t tp = NULL;
+    if (bsp_touch_new(NULL, &tp) == ESP_OK && tp) {
+        const lvgl_port_touch_cfg_t touch_cfg = { .disp = disp, .handle = tp };
+        if (!lvgl_port_add_touch(&touch_cfg)) {
+            ESP_LOGE(TAG, "Could not register the touch screen with LVGL");
+        }
+    } else {
+        ESP_LOGE(TAG, "Touch init failed");
+    }
+
+    bsp_display_brightness_init();
+    ESP_LOGI(TAG, "Display started (%s, %dx%d): %d-line draw bands (%d KB each)", BOARD_NAME,
+             BSP_LCD_H_RES, BSP_LCD_V_RES, APP_LVGL_BUF_LINES,
+             BSP_LCD_H_RES * APP_LVGL_BUF_LINES * BSP_LCD_BITS_PER_PIXEL / 8 / 1024);
+    return disp;
+}
+
+#else
+/* ---------------------------------------------------------------- ESP32-S3-Touch-AMOLED-1.75C */
 lv_display_t *app_display_start(void)
 {
     bsp_display_cfg_t cfg = {
@@ -98,7 +171,9 @@ lv_display_t *app_display_start(void)
         ESP_LOGE(TAG, "LVGL task start failed");
         return NULL;
     }
-    ESP_LOGI(TAG, "Display started: %d-line draw bands (%d KB each)", APP_LVGL_BUF_LINES,
+    ESP_LOGI(TAG, "Display started (%s, %dx%d): %d-line draw bands (%d KB each)", BOARD_NAME,
+             BSP_LCD_H_RES, BSP_LCD_V_RES, APP_LVGL_BUF_LINES,
              BSP_LCD_H_RES * APP_LVGL_BUF_LINES * BSP_LCD_BITS_PER_PIXEL / 8 / 1024);
     return disp;
 }
+#endif

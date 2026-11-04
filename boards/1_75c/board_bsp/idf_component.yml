@@ -1,0 +1,5 @@
+## Waveshare ESP32-S3-Touch-AMOLED-1.75C (round 466 x 466 AMOLED)
+dependencies:
+  waveshare/esp32_s3_touch_amoled_1_75c:
+    version: "^3.0.0"
+    public: true

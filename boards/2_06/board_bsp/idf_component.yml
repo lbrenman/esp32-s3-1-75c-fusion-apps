@@ -1,0 +1,5 @@
+## Waveshare ESP32-S3-Touch-AMOLED-2.06 (410 x 502 AMOLED with rounded corners)
+dependencies:
+  waveshare/esp32_s3_touch_amoled_2_06:
+    version: "^2.0.0"      # the version Waveshare's own 2.06 examples use, with LVGL 9.5.0
+    public: true

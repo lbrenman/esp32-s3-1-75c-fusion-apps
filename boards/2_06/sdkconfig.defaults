@@ -1,0 +1,4 @@
+# ESP32-S3-Touch-AMOLED-2.06 (added after the shared sdkconfig.defaults).
+# Same chip, flash (32 MB), PSRAM (8 MB) and partition table as the 1.75C. The display is started
+# by main/display_start.c with APP_LVGL_BUF_LINES bands; this only matters if bsp_display_start() is used.
+CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT=12

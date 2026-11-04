@@ -32,6 +32,7 @@
 #include "web_settings.h"
 #include "settings_store.h"
 #include "app_config.h"
+#include "board.h"
 #include "net.h"
 #include "voice.h"
 #include "stocks.h"
@@ -269,7 +270,7 @@ static void apply_cb(void *arg)
 static esp_err_t run_job(web_job_t *j)
 {
     xSemaphoreTake(s_done, 0);              /* drop a stale "done" from a request that timed out */
-    if (bsp_display_lock(2000) != ESP_OK) {      /* esp_err_t in the 1.75C BSP 3.x */
+    if (!board_display_lock(2000)) {             /* board.h: true when taken, on either board */
         heap_caps_free(j);
         return ESP_ERR_TIMEOUT;
     }

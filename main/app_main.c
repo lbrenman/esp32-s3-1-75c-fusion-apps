@@ -52,7 +52,7 @@ void app_main(void)
     bsp_display_brightness_set(cfg.brightness);
     power_init();                     /* battery level (AXP2101 on the I2C bus the display started) */
 
-    bsp_display_lock(BOARD_LOCK_FOREVER);
+    board_display_lock(BOARD_LOCK_FOREVER);
     ui_theme_init(disp, cfg.dark_mode);
     ui_nav_init(home_build);
     bsp_display_unlock();

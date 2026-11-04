@@ -412,15 +412,8 @@ static lv_obj_t *tr_build(void *arg)
     s_ui.scr = scr;
     s_ui.last_state = (voice_state_t)-1;
 
-    /* colored ring around the round display shows the state */
-    s_ui.ring = lv_obj_create(scr);
-    lv_obj_remove_style_all(s_ui.ring);
-    lv_obj_set_size(s_ui.ring, UI_SCREEN_SIZE - 6, UI_SCREEN_SIZE - 6);
-    lv_obj_center(s_ui.ring);
-    lv_obj_set_style_radius(s_ui.ring, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(s_ui.ring, 8, 0);
-    lv_obj_set_style_border_color(s_ui.ring, lv_color_hex(0x555555), 0);
-    lv_obj_remove_flag(s_ui.ring, LV_OBJ_FLAG_CLICKABLE);
+    /* colored ring around the edge of the display shows the state */
+    s_ui.ring = ui_status_ring(scr, 8);
 
     s_ui.status = ui_label(scr, &lv_font_montserrat_20, ui_pal.text, "");
     lv_obj_align(s_ui.status, LV_ALIGN_TOP_MID, 0, 50);

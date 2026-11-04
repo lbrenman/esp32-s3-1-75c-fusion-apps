@@ -1,8 +1,9 @@
-"""Convert shots/*.ppm to PNG and build shots/contact_sheet.png (needs Pillow)."""
-import glob, os
+"""Convert <dir>/*.ppm to PNG and build <dir>/contact_sheet.png (needs Pillow). <dir> defaults to shots."""
+import glob, os, sys
 from PIL import Image, ImageDraw
 
-files = sorted(glob.glob("shots/*.ppm"))
+D = sys.argv[1] if len(sys.argv) > 1 else "shots"
+files = sorted(glob.glob(os.path.join(D, "*.ppm")))
 images = []
 for f in files:
     im = Image.open(f).convert("RGB")
@@ -11,12 +12,13 @@ for f in files:
     images.append((os.path.basename(f)[:-4], im))
 
 cols = 4
+W, H = (images[0][1].size if images else (466, 466))
 rows = (len(images) + cols - 1) // cols
-sheet = Image.new("RGB", (cols * 480, rows * 500), (48, 48, 52))
+sheet = Image.new("RGB", (cols * (W + 14), rows * (H + 34)), (48, 48, 52))
 d = ImageDraw.Draw(sheet)
 for k, (name, im) in enumerate(images):
-    x, y = (k % cols) * 480 + 7, (k // cols) * 500 + 24
+    x, y = (k % cols) * (W + 14) + 7, (k // cols) * (H + 34) + 24
     sheet.paste(im, (x, y))
     d.text((x, y - 18), name, fill=(220, 220, 220))
-sheet.save("shots/contact_sheet.png")
-print("Wrote %d screenshots and shots/contact_sheet.png" % len(images))
+sheet.save(os.path.join(D, "contact_sheet.png"))
+print("Wrote %d screenshots and %s/contact_sheet.png" % (len(images), D))

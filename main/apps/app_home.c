@@ -300,12 +300,12 @@ lv_obj_t *home_build(void *arg)
     s_carousel = lv_obj_create(scr);
     lv_obj_t *car = s_carousel;
     lv_obj_remove_style_all(car);
-    lv_obj_set_size(car, UI_SCREEN_SIZE, HOME_TILE_H + 10);
+    lv_obj_set_size(car, UI_W, HOME_TILE_H + 10);
     lv_obj_align(car, LV_ALIGN_CENTER, 0, 6);
     lv_obj_set_flex_flow(car, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(car, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(car, HOME_TILE_GAP, 0);
-    lv_obj_set_style_pad_hor(car, (UI_SCREEN_SIZE - HOME_TILE_W) / 2, 0);   /* first and last can center */
+    lv_obj_set_style_pad_hor(car, (UI_W - HOME_TILE_W) / 2, 0);   /* first and last can center */
     lv_obj_set_scrollbar_mode(car, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(car, LV_DIR_HOR);
     lv_obj_set_scroll_snap_x(car, LV_SCROLL_SNAP_CENTER);

@@ -1,6 +1,7 @@
-# esp32-s3-1-75c-fusion-apps — App launcher for the ESP32-S3-Touch-AMOLED-1.75C
+# esp32-s3-1-75c-fusion-apps — App launcher for the ESP32-S3-Touch-AMOLED-1.75C and 2.06
 
-A small "watch OS" for the Waveshare **ESP32-S3-Touch-AMOLED-1.75C**: a home screen with a clock and
+A small "watch OS" for the Waveshare **ESP32-S3-Touch-AMOLED-1.75C** (round) and
+**ESP32-S3-Touch-AMOLED-2.06** (watch style, see "Boards"): a home screen with a clock and
 app icons, a **Voice chat** app (client for the [Amplify Fusion WebSocket voice server](https://github.com/lbrenman/Amplify-Fusion-AI-Voice-Chat-Demo-Using-Mistral): say "Jarvis" or
 hold to talk),
 a **Translator** app (push-to-talk voice translator for the [Amplify Fusion translator server](https://github.com/lbrenman/GitHubAmplify-Fusion-Voice-Translation-and-Transcription-Demo-Using-Mistral-and-AWS-Translate): speak
@@ -18,6 +19,13 @@ the device.*
 ![Stocks](docs/screenshots/stocks.png)
 
 ![Translator](docs/screenshots/translator.png)
+
+![On the 2.06](docs/screenshots/board_2_06.png)
+
+> **The 2.06 build is new and untested on the board.** Its display start-up compiles against the
+> 2.06 BSP and `esp_lvgl_port` headers, and every screen is checked at 410x502 in
+> `tools/ui_preview` (`make BOARD=2_06`), but it hasn't been built with `idf.py` or run on a 2.06
+> yet. The 1.75C build is unchanged (its screens are pixel-identical to before).
 
 > **The Translator is new and untested on the board.** It reuses the Voice chat engine (recording,
 > WebSocket, MP3 playback), so most of its path is code that already runs on the device. The new
@@ -355,6 +363,52 @@ what you said and the translation, then speaks it. Only hold to talk: no wake wo
 
 ---
 
+## Boards
+
+One codebase for two Waveshare boards. They have the same chip, memory (32 MB flash, 8 MB PSRAM),
+display controller (CO5300), touch, audio (ES8311 + ES7210) and power chip (AXP2101), so only the
+screen shape and the BSP differ.
+
+| | ESP32-S3-Touch-AMOLED-1.75C | ESP32-S3-Touch-AMOLED-2.06 |
+| --- | --- | --- |
+| `BOARD` | `1_75c` (the default) | `2_06` |
+| Screen | 466 x 466, round | 410 x 502, rounded corners |
+| BSP | `waveshare/esp32_s3_touch_amoled_1_75c` ^3 (Espressif's LVGL adapter) | `waveshare/esp32_s3_touch_amoled_2_06` ^2 (`esp_lvgl_port`) |
+| Build folder / sdkconfig | `build/`, `sdkconfig` | `build_2_06/`, `sdkconfig.2_06` |
+| Status ring (Voice chat, Translator) | a circle | follows the rounded corners |
+
+Pick the board when you build:
+
+```bash
+get_idf
+# 1.75C, as before
+idf.py -p /dev/cu.usbmodem1101 build flash monitor
+# 2.06
+idf.py -B build_2_06 -D BOARD=2_06 -p /dev/cu.usbmodem1101 build flash monitor
+```
+
+Each board keeps its own build folder and sdkconfig, so switching never mixes them; the board is
+remembered in the build folder, so later 2.06 builds only need `-B build_2_06`. The first 2.06 build
+downloads its BSP and takes a few minutes. `dependencies.lock` is shared, so the component manager
+re-solves it when you switch boards.
+
+How it fits together:
+
+- `boards/<BOARD>/board_bsp/` is a tiny component: `idf_component.yml` pulls in the board's BSP, and
+  `include/board.h` gives the screen size and shape (`BOARD_SCREEN_W`, `BOARD_SCREEN_H`,
+  `BOARD_SCREEN_ROUND`, `BOARD_CORNER_RADIUS`). Only the chosen board's folder is part of the build.
+- `boards/<BOARD>/sdkconfig.defaults` is added after the shared `sdkconfig.defaults`.
+- `main/display_start.c` starts each board's display with the small double-buffered draw bands
+  (`APP_LVGL_BUF_LINES`) described under "Memory".
+- The UI uses `UI_W` / `UI_H` / `UI_ROUND` (`ui_widgets.h`) instead of a fixed 466. Layouts are
+  placed from the screen's center and edges, so the same code fits both; the 2.06 just has a bit
+  more height. Stocks adds a fade behind its bottom buttons on the rectangular screen.
+- The code can test `APP_BOARD_1_75C` / `APP_BOARD_2_06` (set by the top `CMakeLists.txt`) for the
+  rare board-specific line.
+
+To add another board: copy `boards/2_06`, change its `idf_component.yml` and `board.h`, and add a
+branch for it in `main/display_start.c` if its BSP starts the display differently.
+
 ## Settings: secrets.h is only the first-boot default
 
 `main/secrets.h` holds your Wi-Fi and server values, as before. On first boot the device copies
@@ -399,7 +453,11 @@ bundle instead of `main/server_ca.pem`. Values already saved on the device win o
 ```
 esp32-s3-1-75c-fusion-apps/
 ├── CMakeLists.txt, partitions.csv, sdkconfig.defaults   Waveshare 1.75C base (+ this project's settings;
-│                                  partitions.csv has a 1 MB "model" partition for the wake word)
+│                                  partitions.csv has a 1 MB "model" partition for the wake word).
+│                                  CMakeLists.txt picks the board (BOARD=1_75c or 2_06)
+├── boards/
+│   ├── 1_75c/                     board_bsp/ (BSP dependency + board.h), sdkconfig.defaults
+│   └── 2_06/                      the same for the ESP32-S3-Touch-AMOLED-2.06
 ├── sdkconfig.fusion_apps          just this project's settings, for reference
 ├── components/bsp_extra/          Waveshare's audio helper (codec, I2S, speaker amp)
 ├── main/
@@ -412,7 +470,7 @@ esp32-s3-1-75c-fusion-apps/
 │   │                              Arabic and pre-shaped Hindi for the Translator)
 │   ├── text_deva_map.h            Hindi pre-shaped sequences (generated with the fonts)
 │   ├── power.c/.h                 battery level and charging from the AXP2101 power chip
-│   ├── display_start.c/.h         starts display + touch + LVGL like the BSP, with smaller draw bands
+│   ├── display_start.c/.h         starts display + touch + LVGL like the BSP, with smaller draw bands (per board)
 │   ├── web_settings.c/.h          phone settings page: HTTP server, PIN sign-in, JSON API, mDNS name
 │   ├── web/settings.html          the page itself (compiled in; no external files)
 │   ├── secrets.h.example          copy to secrets.h (gitignored)
@@ -455,7 +513,7 @@ that have already been closed.
 
 Same as voice_chat:
 
-- Waveshare **ESP32-S3-Touch-AMOLED-1.75C** (not the plain 1.75)
+- Waveshare **ESP32-S3-Touch-AMOLED-1.75C** (not the plain 1.75) or **ESP32-S3-Touch-AMOLED-2.06**
 - ESP-IDF **5.5 or newer**, exported in your terminal (`get_idf`)
 - `openssl` (preinstalled on macOS), used once to fetch the server certificate
 - A 2.4 GHz Wi-Fi network, a speaker on the board's speaker connector, and your voice server on `wss://`
@@ -479,6 +537,9 @@ cp ~/esp/projects/ESP32-S3-1-75C-fusion-voice-chat/main/secrets.h main/secrets.h
 get_idf
 idf.py set-target esp32s3
 idf.py -p /dev/cu.usbmodem101 build flash monitor
+#    On a 2.06 (see "Boards"):
+#    idf.py -B build_2_06 -D BOARD=2_06 set-target esp32s3
+#    idf.py -B build_2_06 -p /dev/cu.usbmodem101 build flash monitor
 ```
 
 The first build downloads the BSP, LVGL, the WebSocket client and ESP-SR (the wake word) and fetches `main/server_ca.pem`
@@ -600,9 +661,14 @@ fastest way to try a layout change before flashing.
 
 ```bash
 cd tools/ui_preview
-make                      # first run clones and builds LVGL 9.5 (about a minute)
+make                      # 1.75C; first run clones and builds LVGL 9.5 (about a minute)
 open shots/contact_sheet.png
+make BOARD=2_06           # the same screens at 410x502, in shots_2_06/
+open shots_2_06/contact_sheet.png
 ```
+
+The click-through script places taps and swipes from the screen's center and edges (`CX`, `MY`,
+`TY`, `BY` in `sim.c`), so it runs on both screen sizes.
 
 Change the fake values in `stubs.c` or the click-through script in `sim.c` to preview other states.
 The Stocks screens use a fake watchlist (`stocks_fake_load()` in `stubs.c`); shots `40_` to `59_`.
@@ -786,4 +852,7 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app
 | Settings > Phone: "Didn't start: see the log" | The web server couldn't start (log: `web: Web server didn't start`) | Usually out of sockets or memory; restart the watch |
 | Phone: "The watch is busy - try again" | The watch's screen task was busy for more than 2 s | Try again |
 | Build: `mdns.h: No such file` | The mdns component wasn't downloaded | `idf.py reconfigure` (it's in `main/idf_component.yml`) |
+| 2.06: build stops with `Unknown BOARD` | Typo in `-D BOARD=` | Use `2_06` or `1_75c` |
+| 2.06: built the 1.75C by mistake (`display: Display started (ESP32-S3-Touch-AMOLED-1.75C ...` on a 2.06) | The board is remembered per build folder; `build/` is the 1.75C | Build with `-B build_2_06` (and `-D BOARD=2_06` the first time) |
+| 2.06: screen stays black, touch or audio dead | Board package difference not caught in the preview | Send the boot log (`display`, `voice`, `power` lines); the board layer is `main/display_start.c` and `boards/2_06/` |
 | No battery level on Home | The AXP2101 didn't answer on I2C (`power:` lines in the log) | Check the log line; the rest of the app works without it |

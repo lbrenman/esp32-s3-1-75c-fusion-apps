@@ -1,5 +1,5 @@
 ## IDF Component Manager Manifest File
-## The 1.75C BSP (waveshare/esp32_s3_touch_amoled_1_75c) comes in through components/bsp_extra.
+## The board's BSP comes in through boards/<BOARD>/board_bsp (see the top CMakeLists.txt).
 dependencies:
   lvgl/lvgl:
     version: "9.5.0"        # same LVGL version as Waveshare's 1.75C example

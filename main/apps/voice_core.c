@@ -22,7 +22,7 @@
  * Text keeps its accents (UTF-8 for the ui_font_latin_* fonts). See the protocol README of the
  * translator server for the full contract.
  *
- * Audio uses Waveshare's bsp_extra helper on top of the 1.75C BSP (the same calls as the working
+ * Audio uses Waveshare's bsp_extra helper on top of the board's BSP (the same calls as the working
  * 05_Spec_Analyzer example).
  */
 

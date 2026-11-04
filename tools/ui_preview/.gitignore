@@ -3,3 +3,5 @@ obj/
 liblvgl.a
 sim
 shots/
+sim_*
+shots_*/

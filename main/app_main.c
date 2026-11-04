@@ -1,5 +1,6 @@
 /*
  * esp32-s3-1-75c-fusion-apps — a small app launcher for the Waveshare ESP32-S3-Touch-AMOLED-1.75C
+ * and ESP32-S3-Touch-AMOLED-2.06 (BOARD in the top CMakeLists.txt; boards/<BOARD>/board_bsp)
  *
  *   Home screen ─┬─ Voice chat  (push-to-talk client for the Amplify Fusion voice server)
  *                ├─ Translator  (push-to-talk voice translator, same engine as Voice chat)
@@ -31,12 +32,13 @@
 #include "ui_theme.h"
 #include "ui_nav.h"
 #include "app_config.h"
+#include "board.h"
 
 #define TAG "app"
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "%s v%s for ESP32-S3-Touch-AMOLED-1.75C", APP_NAME, APP_VERSION);
+    ESP_LOGI(TAG, "%s v%s for %s", APP_NAME, APP_VERSION, BOARD_NAME);
 
     settings_init();
     app_settings_t cfg;
@@ -50,7 +52,7 @@ void app_main(void)
     bsp_display_brightness_set(cfg.brightness);
     power_init();                     /* battery level (AXP2101 on the I2C bus the display started) */
 
-    bsp_display_lock(-1);
+    bsp_display_lock(BOARD_LOCK_FOREVER);
     ui_theme_init(disp, cfg.dark_mode);
     ui_nav_init(home_build);
     bsp_display_unlock();

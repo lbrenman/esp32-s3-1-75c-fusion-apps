@@ -16,14 +16,15 @@
 #include "power.h"
 
 /* Carousel geometry */
-#define HOME_TILE_W      120      /* tile width (orb + name) */
-#define HOME_ORB         104      /* orb size of the tile in the middle */
+/* (round 1.75C, rectangular 2.06): the 2.06 has the height for bigger orbs */
+#define HOME_TILE_W      UI_SZ(120, 140)  /* tile width (orb + name) */
+#define HOME_ORB         UI_SZ(104, 128)  /* orb size of the tile in the middle */
 #define HOME_TILE_GAP    10
 #define HOME_TILE_STEP   (HOME_TILE_W + HOME_TILE_GAP)
-#define HOME_SIDE_ORB    80       /* orb size of the neighbors (the 56 px icon still fits)... */
+#define HOME_SIDE_ORB    UI_SZ(80, 96)    /* orb size of the neighbors (the 56 px icon still fits)... */
 #define HOME_SIDE_OPA    140      /* ...and how dim they are (255 = not at all) */
-#define HOME_FAR_ORB     60       /* two away: smaller still, and faded out */
-#define HOME_TILE_H      150      /* orb area (HOME_ORB) + name */
+#define HOME_FAR_ORB     UI_SZ(60, 72)    /* two away: smaller still, and faded out */
+#define HOME_TILE_H      UI_SZ(150, 178)  /* orb area (HOME_ORB) + name */
 
 static int       s_center_app = 0;      /* the app in the middle of the carousel; kept across rebuilds */
 static lv_obj_t  *s_carousel;
@@ -256,7 +257,7 @@ static lv_obj_t *tile(lv_obj_t *parent, const ui_app_t *app, int w, int orb_size
     lv_obj_add_flag(orb, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_align(orb, LV_ALIGN_CENTER, 0, orb_size / 2 - HOME_TILE_H / 2);   /* center at y = orb_size / 2 */
 
-    lv_obj_t *name = ui_label(t, &lv_font_montserrat_16, ui_pal.text, app->name);
+    lv_obj_t *name = ui_label(t, UI_FONT(16, 20), ui_pal.text, app->name);
     lv_obj_align(name, LV_ALIGN_BOTTOM_MID, 0, -4);
     lv_obj_add_event_cb(t, tile_cb, LV_EVENT_CLICKED, (void *)app);
     return t;
@@ -275,25 +276,25 @@ lv_obj_t *home_build(void *arg)
     lv_obj_set_flex_flow(s_batt, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(s_batt, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(s_batt, 5, 0);
-    lv_obj_align(s_batt, LV_ALIGN_TOP_MID, 0, 22);
+    lv_obj_align(s_batt, LV_ALIGN_TOP_MID, 0, UI_SZ(22, 16));
     s_batt_state = ui_icon(s_batt, &ui_icons_16, ui_pal.ok, ICON_BOLT);
     s_batt_icon = ui_icon(s_batt, &ui_icons_20, ui_pal.text_dim, ICON_BATTERY_FULL);
-    s_batt_text = ui_label(s_batt, &lv_font_montserrat_14, ui_pal.text_dim, "");
+    s_batt_text = ui_label(s_batt, UI_FONT(14, 16), ui_pal.text_dim, "");
 
     /* date + time */
-    s_date = ui_label(scr, &lv_font_montserrat_16, ui_pal.text_dim, "");
-    lv_obj_align(s_date, LV_ALIGN_TOP_MID, 0, 50);
+    s_date = ui_label(scr, UI_FONT(16, 20), ui_pal.text_dim, "");
+    lv_obj_align(s_date, LV_ALIGN_TOP_MID, 0, UI_SZ(50, 46));
 
     lv_obj_t *clock = lv_obj_create(scr);
     lv_obj_remove_style_all(clock);
     lv_obj_remove_flag(clock, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(clock, LV_SIZE_CONTENT, 56);
-    lv_obj_align(clock, LV_ALIGN_TOP_MID, 0, 72);
+    lv_obj_align(clock, LV_ALIGN_TOP_MID, 0, UI_SZ(72, 74));
     lv_obj_set_flex_flow(clock, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(clock, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
     lv_obj_set_style_pad_column(clock, 6, 0);
     s_time = ui_label(clock, &lv_font_montserrat_44, ui_pal.text, "");
-    s_ampm = ui_label(clock, &lv_font_montserrat_16, ui_pal.text_dim, "");
+    s_ampm = ui_label(clock, UI_FONT(16, 20), ui_pal.text_dim, "");
     lv_obj_set_style_pad_bottom(s_ampm, 8, 0);
 
     /* app carousel: swipe left/right, one app per swipe, the one in the middle snaps to center */
@@ -301,7 +302,7 @@ lv_obj_t *home_build(void *arg)
     lv_obj_t *car = s_carousel;
     lv_obj_remove_style_all(car);
     lv_obj_set_size(car, UI_W, HOME_TILE_H + 10);
-    lv_obj_align(car, LV_ALIGN_CENTER, 0, 6);
+    lv_obj_align(car, LV_ALIGN_CENTER, 0, UI_SZ(6, 22));
     lv_obj_set_flex_flow(car, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(car, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(car, HOME_TILE_GAP, 0);
@@ -325,7 +326,7 @@ lv_obj_t *home_build(void *arg)
     lv_obj_set_flex_flow(dots, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(dots, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(dots, 6, 0);
-    lv_obj_align(dots, LV_ALIGN_BOTTOM_MID, 0, -142);
+    lv_obj_align(dots, LV_ALIGN_BOTTOM_MID, 0, UI_SZ(-142, -128));
     for (int i = 0; i < g_app_count && i < (int)(sizeof(s_dots) / sizeof(s_dots[0])); i++) {
         lv_obj_t *d = lv_obj_create(dots);
         lv_obj_remove_style_all(d);
@@ -345,7 +346,7 @@ lv_obj_t *home_build(void *arg)
     lv_obj_t *pill = lv_obj_create(scr);
     lv_obj_remove_style_all(pill);
     lv_obj_remove_flag(pill, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(pill, LV_SIZE_CONTENT, 34);
+    lv_obj_set_size(pill, LV_SIZE_CONTENT, UI_SZ(34, 40));
     lv_obj_set_style_max_width(pill, 300, 0);
     lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(pill, ui_pal.card, 0);
@@ -354,19 +355,19 @@ lv_obj_t *home_build(void *arg)
     lv_obj_set_style_pad_column(pill, 8, 0);
     lv_obj_set_flex_flow(pill, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(pill, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_align(pill, LV_ALIGN_BOTTOM_MID, 0, -96);
-    s_wifi_icon = ui_icon(pill, &ui_icons_16, ui_pal.text_dim, ICON_WIFI);
-    s_wifi_text = ui_label(pill, &lv_font_montserrat_14, ui_pal.text, "");
+    lv_obj_align(pill, LV_ALIGN_BOTTOM_MID, 0, UI_SZ(-96, -76));
+    s_wifi_icon = ui_icon(pill, UI_SZ(&ui_icons_16, &ui_icons_20), ui_pal.text_dim, ICON_WIFI);
+    s_wifi_text = ui_label(pill, UI_FONT(14, 16), ui_pal.text, "");
     /* one line, "..." if the network name is too long (without a fixed height it would wrap
      * to a second line and spill out of the pill) */
     lv_obj_set_style_max_width(s_wifi_text, 240, 0);
-    lv_obj_set_height(s_wifi_text, lv_font_get_line_height(&lv_font_montserrat_14));
+    lv_obj_set_height(s_wifi_text, lv_font_get_line_height(UI_FONT(14, 16)));
     lv_label_set_long_mode(s_wifi_text, LV_LABEL_LONG_MODE_DOTS);
 
     /* day/night toggle: shows the mode it switches to */
     lv_obj_t *theme = ui_round_button(scr, ui_theme_is_dark() ? ICON_SUN : ICON_MOON, &ui_icons_20, 50,
                                       ui_pal.card, ui_theme_is_dark() ? lv_color_hex(0xFFC940) : ui_pal.accent);
-    lv_obj_align(theme, LV_ALIGN_BOTTOM_MID, 0, -30);
+    lv_obj_align(theme, LV_ALIGN_BOTTOM_MID, 0, UI_SZ(-30, -18));
     lv_obj_add_event_cb(theme, theme_cb, LV_EVENT_CLICKED, NULL);
 
     update_clock();

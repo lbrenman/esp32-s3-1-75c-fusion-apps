@@ -103,7 +103,7 @@ static void list_fade(lv_obj_t *list)
         int32_t cy = (a.y1 + a.y2) / 2;
         int32_t d = LV_ABS(cy - CENTER_Y);
         lv_opa_t opa = LV_OPA_COVER;
-        const int32_t keep = CENTER_Y - 103;          /* fully visible this close to the middle */
+        const int32_t keep = CENTER_Y - UI_SZ(103, 50);   /* fully visible this close to the middle */
         if (d > keep) {
             int32_t v = 255 - (d - keep) * 215 / 100;
             opa = (lv_opa_t)LV_CLAMP(30, v, 255);
@@ -162,8 +162,8 @@ lv_obj_t *ui_list_screen(lv_obj_t **out_screen, const char *title, bool back)
     lv_obj_center(list);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_top(list, 96, 0);
-    lv_obj_set_style_pad_bottom(list, 130, 0);
+    lv_obj_set_style_pad_top(list, UI_LIST_TOP, 0);
+    lv_obj_set_style_pad_bottom(list, UI_LIST_BOTTOM, 0);
     lv_obj_set_style_pad_row(list, 8, 0);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
@@ -173,27 +173,27 @@ lv_obj_t *ui_list_screen(lv_obj_t **out_screen, const char *title, bool back)
 
     lv_obj_add_event_cb(scr, list_gesture_cb, LV_EVENT_GESTURE, NULL);
 
-    edge_fade(scr, true, 112);
-    edge_fade(scr, false, 110);
+    edge_fade(scr, true, UI_SZ(112, 118));
+    edge_fade(scr, false, UI_SZ(110, 60));
 
     /* header: [<] Title, centered */
     lv_obj_t *hdr = lv_obj_create(scr);
     plain(hdr);
     lv_obj_set_size(hdr, LV_SIZE_CONTENT, 48);
-    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 34);
+    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, UI_HEADER_Y);
     lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(hdr, 10, 0);
     if (back) {
-        lv_obj_t *b = ui_round_button(hdr, ICON_LEFT, &ui_icons_16, 40, ui_pal.card, ui_pal.text);
+        lv_obj_t *b = ui_round_button(hdr, ICON_LEFT, UI_SZ(&ui_icons_16, &ui_icons_20), UI_SZ(40, 46), ui_pal.card, ui_pal.text);
         lv_obj_add_event_cb(b, back_cb, LV_EVENT_CLICKED, NULL);
     }
-    ui_label(hdr, &lv_font_montserrat_24, ui_pal.text, title);
+    ui_label(hdr, UI_F_TITLE, ui_pal.text, title);
     if (back) {
         /* invisible spacer keeps the title centered */
         lv_obj_t *sp = lv_obj_create(hdr);
         plain(sp);
-        lv_obj_set_size(sp, 40, 40);
+        lv_obj_set_size(sp, UI_SZ(40, 46), UI_SZ(40, 46));
     }
 
     if (out_screen) *out_screen = scr;
@@ -202,7 +202,7 @@ lv_obj_t *ui_list_screen(lv_obj_t **out_screen, const char *title, bool back)
 
 lv_obj_t *ui_section(lv_obj_t *list, const char *text)
 {
-    lv_obj_t *l = ui_label(list, &lv_font_montserrat_14, ui_pal.text_dim, text);
+    lv_obj_t *l = ui_label(list, UI_F_SECTION, ui_pal.text_dim, text);
     lv_obj_set_width(l, UI_LIST_WIDTH - 28);
     lv_obj_set_style_pad_top(l, 10, 0);
     lv_obj_set_style_text_letter_space(l, 1, 0);
@@ -216,7 +216,7 @@ static lv_obj_t *row_base(lv_obj_t *list, const char *icon, uint32_t icon_color,
     lv_obj_remove_style_all(row);
     lv_obj_set_width(row, UI_LIST_WIDTH);
     lv_obj_set_height(row, LV_SIZE_CONTENT);
-    lv_obj_set_style_min_height(row, 62, 0);
+    lv_obj_set_style_min_height(row, UI_ROW_H, 0);
     lv_obj_set_style_radius(row, 20, 0);
     lv_obj_set_style_bg_color(row, ui_pal.card, 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
@@ -236,11 +236,11 @@ static lv_obj_t *row_base(lv_obj_t *list, const char *icon, uint32_t icon_color,
     if (icon) {
         lv_obj_t *box = lv_obj_create(row);
         plain(box);
-        lv_obj_set_size(box, 36, 36);
-        lv_obj_set_style_radius(box, 11, 0);
+        lv_obj_set_size(box, UI_ROW_ICON, UI_ROW_ICON);
+        lv_obj_set_style_radius(box, UI_SZ(11, 13), 0);
         lv_obj_set_style_bg_color(box, lv_color_hex(icon_color), 0);
         lv_obj_set_style_bg_opa(box, LV_OPA_COVER, 0);
-        lv_obj_t *i = ui_icon(box, &ui_icons_20, lv_color_white(), icon);
+        lv_obj_t *i = ui_icon(box, UI_SZ(&ui_icons_20, &ui_icons_28), lv_color_white(), icon);
         lv_obj_center(i);
     }
     return row;
@@ -263,9 +263,9 @@ ui_row_t ui_row(lv_obj_t *list, const char *icon, uint32_t icon_color, const cha
     ui_row_t r = { 0 };
     r.row = row_base(list, icon, icon_color, on_click != NULL);
     lv_obj_t *col = text_col(r.row);
-    r.title = ui_label(col, &lv_font_montserrat_16, ui_pal.text, title);
+    r.title = ui_label(col, UI_F_ROW, ui_pal.text, title);
     if (value) {
-        r.value = ui_label(col, &lv_font_montserrat_14, ui_pal.text_dim, value);
+        r.value = ui_label(col, UI_F_VALUE, ui_pal.text_dim, value);
         lv_obj_set_width(r.value, LV_PCT(100));
         lv_label_set_long_mode(r.value, LV_LABEL_LONG_MODE_DOTS);
     }
@@ -281,9 +281,9 @@ lv_obj_t *ui_row_switch(lv_obj_t *list, const char *icon, uint32_t icon_color, c
 {
     lv_obj_t *row = row_base(list, icon, icon_color, false);
     lv_obj_t *col = text_col(row);
-    ui_label(col, &lv_font_montserrat_16, ui_pal.text, title);
+    ui_label(col, UI_F_ROW, ui_pal.text, title);
     lv_obj_t *sw = lv_switch_create(row);
-    lv_obj_set_size(sw, 56, 32);
+    lv_obj_set_size(sw, UI_SZ(56, 64), UI_SZ(32, 36));
     lv_obj_remove_flag(sw, LV_OBJ_FLAG_GESTURE_BUBBLE);
     if (on) lv_obj_add_state(sw, LV_STATE_CHECKED);
     lv_obj_add_event_cb(sw, on_change, LV_EVENT_VALUE_CHANGED, user);
@@ -296,12 +296,12 @@ ui_toggle_row_t ui_row_toggle(lv_obj_t *list, const char *icon, uint32_t icon_co
     ui_toggle_row_t r;
     r.row = row_base(list, icon, icon_color, false);
     lv_obj_t *col = text_col(r.row);
-    ui_label(col, &lv_font_montserrat_16, ui_pal.text, title);
-    r.value = ui_label(col, &lv_font_montserrat_14, ui_pal.text_dim, value);
+    ui_label(col, UI_F_ROW, ui_pal.text, title);
+    r.value = ui_label(col, UI_F_VALUE, ui_pal.text_dim, value);
     lv_obj_set_width(r.value, LV_PCT(100));
     lv_label_set_long_mode(r.value, LV_LABEL_LONG_MODE_DOTS);
     r.sw = lv_switch_create(r.row);
-    lv_obj_set_size(r.sw, 56, 32);
+    lv_obj_set_size(r.sw, UI_SZ(56, 64), UI_SZ(32, 36));
     lv_obj_remove_flag(r.sw, LV_OBJ_FLAG_GESTURE_BUBBLE);
     if (on) lv_obj_add_state(r.sw, LV_STATE_CHECKED);
     lv_obj_add_event_cb(r.sw, on_change, LV_EVENT_VALUE_CHANGED, user);
@@ -322,8 +322,8 @@ lv_obj_t *ui_row_slider(lv_obj_t *list, const char *icon, uint32_t icon_color, c
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_style_pad_row(row, 14, 0);
     lv_obj_t *col = text_col(row);
-    ui_label(col, &lv_font_montserrat_16, ui_pal.text, title);
-    lv_obj_t *val = ui_label(row, &lv_font_montserrat_14, ui_pal.text_dim, "");
+    ui_label(col, UI_F_ROW, ui_pal.text, title);
+    lv_obj_t *val = ui_label(row, UI_F_VALUE, ui_pal.text_dim, "");
     lv_label_set_text_fmt(val, "%d%%", value);
 
     lv_obj_t *s = lv_slider_create(row);
@@ -350,7 +350,7 @@ lv_obj_t *ui_hint(lv_obj_t *scr, const char *icon, const char *text)
     lv_obj_set_flex_align(h, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(h, 6, 0);
     if (icon) ui_icon(h, &ui_icons_16, ui_pal.text_dim, icon);
-    ui_label(h, &lv_font_montserrat_14, ui_pal.text_dim, text);
+    ui_label(h, UI_F_HINT, ui_pal.text_dim, text);
     lv_obj_align(h, LV_ALIGN_BOTTOM_MID, 0, -44);
     return h;
 }
@@ -368,7 +368,7 @@ void ui_toast(const char *text)
     lv_obj_set_style_radius(t, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_pad_hor(t, 20, 0);
     lv_obj_set_style_pad_ver(t, 10, 0);
-    lv_obj_t *l = ui_label(t, &lv_font_montserrat_16, lv_color_white(), text);
+    lv_obj_t *l = ui_label(t, UI_F_BODY, lv_color_white(), text);
     lv_obj_set_style_max_width(l, 300, 0);
     lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, -90);
 
@@ -406,14 +406,14 @@ static lv_obj_t *dialog_button(lv_obj_t *parent, const char *text, lv_color_t bg
 {
     lv_obj_t *b = lv_obj_create(parent);
     lv_obj_remove_style_all(b);
-    lv_obj_set_size(b, 124, 48);
+    lv_obj_set_size(b, UI_SZ(124, 140), UI_SZ(48, 56));
     lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(b, bg, 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_70, LV_STATE_PRESSED);
     lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_user_data(b, (void *)(uintptr_t)ok);
-    lv_obj_t *l = ui_label(b, &lv_font_montserrat_16, fg, text);
+    lv_obj_t *l = ui_label(b, UI_F_BODY, fg, text);
     lv_obj_center(l);
     lv_obj_add_event_cb(b, confirm_btn_cb, LV_EVENT_CLICKED, overlay);
     return b;
@@ -436,7 +436,7 @@ void ui_confirm(const char *title, const char *msg, const char *ok_text, bool da
 
     lv_obj_t *card = lv_obj_create(ov);
     plain(card);
-    lv_obj_set_size(card, 330, LV_SIZE_CONTENT);
+    lv_obj_set_size(card, UI_SZ(330, UI_W - 40), LV_SIZE_CONTENT);
     lv_obj_center(card);
     lv_obj_set_style_radius(card, 32, 0);
     lv_obj_set_style_bg_color(card, ui_pal.card, 0);
@@ -446,8 +446,8 @@ void ui_confirm(const char *title, const char *msg, const char *ok_text, bool da
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    ui_label(card, &lv_font_montserrat_20, ui_pal.text, title);
-    lv_obj_t *m = ui_label(card, &lv_font_montserrat_14, ui_pal.text_dim, msg);
+    ui_label(card, UI_FONT(20, 24), ui_pal.text, title);
+    lv_obj_t *m = ui_label(card, UI_FONT(14, 16), ui_pal.text_dim, msg);
     lv_obj_set_width(m, LV_PCT(100));
     lv_obj_set_style_text_align(m, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(m, LV_LABEL_LONG_MODE_WRAP);

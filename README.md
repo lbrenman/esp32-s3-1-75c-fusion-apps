@@ -22,10 +22,10 @@ the device.*
 
 ![On the 2.06](docs/screenshots/board_2_06.png)
 
-> **The 2.06 build is new and untested on the board.** Its display start-up compiles against the
-> 2.06 BSP and `esp_lvgl_port` headers, and every screen is checked at 410x502 in
-> `tools/ui_preview` (`make BOARD=2_06`), but it hasn't been built with `idf.py` or run on a 2.06
-> yet. The 1.75C build is unchanged (its screens are pixel-identical to before).
+> **The 2.06 build runs on the board.** Its screens use the larger rectangular display: bigger
+> text, rows, buttons and orbs, and fewer of the edge fades the round screen needs. Every screen
+> is checked at 410x502 in `tools/ui_preview` (`make BOARD=2_06`). The 1.75C build is unchanged
+> (its screens are pixel-identical to before).
 
 > **The Translator is new and untested on the board.** It reuses the Voice chat engine (recording,
 > WebSocket, MP3 playback), so most of its path is code that already runs on the device. The new
@@ -375,7 +375,8 @@ screen shape and the BSP differ.
 | Screen | 466 x 466, round | 410 x 502, rounded corners |
 | BSP | `waveshare/esp32_s3_touch_amoled_1_75c` ^3 (Espressif's LVGL adapter) | `waveshare/esp32_s3_touch_amoled_2_06` ^2 (`esp_lvgl_port`) |
 | Build folder / sdkconfig | `build/`, `sdkconfig` | `build_2_06/`, `sdkconfig.2_06` |
-| Status ring (Voice chat, Translator) | a circle | follows the rounded corners |
+| Status ring (Voice chat, Translator) | a circle | follows the rounded corners (radius 120 px, measured on the device) |
+| Text and controls | sized for the circle | larger (`UI_SZ` / `UI_FONT`, see below) |
 
 Pick the board when you build:
 
@@ -401,8 +402,16 @@ How it fits together:
 - `main/display_start.c` starts each board's display with the small double-buffered draw bands
   (`APP_LVGL_BUF_LINES`) described under "Memory".
 - The UI uses `UI_W` / `UI_H` / `UI_ROUND` (`ui_widgets.h`) instead of a fixed 466. Layouts are
-  placed from the screen's center and edges, so the same code fits both; the 2.06 just has a bit
-  more height. Stocks adds a fade behind its bottom buttons on the rectangular screen.
+  placed from the screen's center and edges, so the same code fits both. Stocks adds a fade behind
+  its bottom buttons on the rectangular screen.
+- Sizes that differ per board use `UI_SZ(round, rect)` and fonts `UI_FONT(round, rect)` (for
+  example `UI_FONT(16, 20)` is Montserrat 16 on the 1.75C and 20 on the 2.06). Shared list sizes
+  are named in `ui_widgets.h` (`UI_F_TITLE`, `UI_F_ROW`, `UI_ROW_H`, `UI_LIST_TOP`, ...): change
+  one there to change every list screen. The choice is made at compile time, so the 1.75C build
+  is exactly as before.
+- `BOARD_CORNER_RADIUS` (in `boards/2_06/board_bsp/include/board.h`) is the radius of the panel's
+  visible corners. The status ring and the preview's mask follow it; if the ring looks clipped in
+  the corners, raise it, and if it sits too far inside, lower it.
 - The code can test `APP_BOARD_1_75C` / `APP_BOARD_2_06` (set by the top `CMakeLists.txt`) for the
   rare board-specific line.
 

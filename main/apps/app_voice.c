@@ -23,7 +23,7 @@
 #include "app_config.h"
 
 #define REPLY_BIG_FONT_CHARS 90             // longer replies switch to the 16 px font
-#define ORB_SIZE             132
+#define ORB_SIZE             UI_SZ(132, 156)
 
 /* ---- "thinking" animation: three dots bouncing in a wave -------------------------------- */
 #define DOT_COUNT     3
@@ -198,12 +198,12 @@ static void ui_update(bool force)
     if (reply[0]) {
         lv_obj_set_style_text_color(s_ui.reply, ui_pal.text, 0);
         lv_obj_set_style_text_font(s_ui.reply, strlen(reply) > REPLY_BIG_FONT_CHARS ?
-                                   &lv_font_montserrat_16 : &lv_font_montserrat_20, 0);
+                                   UI_FONT(16, 20) : UI_FONT(20, 24), 0);
         lv_label_set_text(s_ui.reply, reply);
     } else {
         /* a note with part of a conversation on screen goes where the reply would be */
         lv_obj_set_style_text_color(s_ui.reply, ui_pal.warn, 0);
-        lv_obj_set_style_text_font(s_ui.reply, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(s_ui.reply, UI_FONT(16, 18), 0);
         lv_label_set_text(s_ui.reply, has_text ? note : "");
     }
     /* otherwise the note sits under the orb */
@@ -295,8 +295,8 @@ static lv_obj_t *voice_build(void *arg)
     /* colored ring around the edge of the display shows the state */
     s_ui.ring = ui_status_ring(scr, 8);
 
-    s_ui.status = ui_label(scr, &lv_font_montserrat_20, ui_pal.text, "");
-    lv_obj_align(s_ui.status, LV_ALIGN_TOP_MID, 0, 64);
+    s_ui.status = ui_label(scr, UI_FONT(20, 24), ui_pal.text, "");
+    lv_obj_align(s_ui.status, LV_ALIGN_TOP_MID, 0, UI_SZ(64, 40));
 
     /* listening halo + mic orb */
     s_ui.halo = lv_obj_create(scr);
@@ -317,8 +317,8 @@ static lv_obj_t *voice_build(void *arg)
      * Content is centered vertically; anything that doesn't fit is clipped inside the circle. */
     s_ui.col = lv_obj_create(scr);
     lv_obj_remove_style_all(s_ui.col);
-    lv_obj_set_size(s_ui.col, 330, 240);
-    lv_obj_align(s_ui.col, LV_ALIGN_CENTER, 0, 12);
+    lv_obj_set_size(s_ui.col, UI_SZ(330, UI_W - 44), UI_SZ(240, 340));
+    lv_obj_align(s_ui.col, LV_ALIGN_CENTER, 0, UI_SZ(12, 10));
     lv_obj_set_flex_flow(s_ui.col, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_ui.col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(s_ui.col, 14, 0);
@@ -326,20 +326,20 @@ static lv_obj_t *voice_build(void *arg)
     lv_obj_remove_flag(s_ui.col, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_ui.col, LV_OBJ_FLAG_HIDDEN);
 
-    s_ui.heard = ui_label(s_ui.col, &lv_font_montserrat_16, ui_pal.text_dim, "");
+    s_ui.heard = ui_label(s_ui.col, UI_FONT(16, 18), ui_pal.text_dim, "");
     lv_obj_set_width(s_ui.heard, LV_PCT(100));
     lv_label_set_long_mode(s_ui.heard, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_text_align(s_ui.heard, LV_TEXT_ALIGN_CENTER, 0);
 
-    s_ui.reply = ui_label(s_ui.col, &lv_font_montserrat_20, ui_pal.text, "");
+    s_ui.reply = ui_label(s_ui.col, UI_FONT(20, 24), ui_pal.text, "");
     lv_obj_set_width(s_ui.reply, LV_PCT(100));
     lv_label_set_long_mode(s_ui.reply, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_text_align(s_ui.reply, LV_TEXT_ALIGN_CENTER, 0);
 
     dots_build(scr);
 
-    s_ui.note = ui_label(scr, &lv_font_montserrat_14, ui_pal.warn, "");
-    lv_obj_set_width(s_ui.note, 300);
+    s_ui.note = ui_label(scr, UI_FONT(14, 16), ui_pal.warn, "");
+    lv_obj_set_width(s_ui.note, UI_SZ(300, UI_W - 60));
     lv_label_set_long_mode(s_ui.note, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_text_align(s_ui.note, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(s_ui.note, LV_ALIGN_CENTER, 0, ORB_SIZE / 2 + 34);
@@ -353,12 +353,12 @@ static lv_obj_t *voice_build(void *arg)
     lv_obj_set_flex_align(s_ui.hint, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(s_ui.hint, 6, 0);
     ui_icon(s_ui.hint, &ui_icons_16, ui_pal.text_dim, ICON_UP);
-    ui_label(s_ui.hint, &lv_font_montserrat_14, ui_pal.text_dim, "Server");
-    lv_obj_t *gap = ui_label(s_ui.hint, &lv_font_montserrat_14, ui_pal.text_dim, "");
+    ui_label(s_ui.hint, UI_F_HINT, ui_pal.text_dim, "Server");
+    lv_obj_t *gap = ui_label(s_ui.hint, UI_F_HINT, ui_pal.text_dim, "");
     lv_obj_set_width(gap, 14);
     ui_icon(s_ui.hint, &ui_icons_16, ui_pal.text_dim, ICON_LEFT);
-    ui_label(s_ui.hint, &lv_font_montserrat_14, ui_pal.text_dim, "Home");
-    lv_obj_align(s_ui.hint, LV_ALIGN_BOTTOM_MID, 0, -64);
+    ui_label(s_ui.hint, UI_F_HINT, ui_pal.text_dim, "Home");
+    lv_obj_align(s_ui.hint, LV_ALIGN_BOTTOM_MID, 0, UI_SZ(-64, -40));
 
     /* invisible full-screen touch area on top of everything */
     lv_obj_t *touch = lv_obj_create(scr);
@@ -530,11 +530,11 @@ static lv_obj_t *voice_settings_build(void *arg)
     s_vs_scr = scr;
     lv_obj_set_user_data(scr, UI_CUSTOM_GESTURES);
     lv_obj_remove_flag(list, LV_OBJ_FLAG_SCROLLABLE);   /* vertical swipes are navigation here */
-    lv_obj_set_style_pad_top(list, 100, 0);
+    lv_obj_set_style_pad_top(list, UI_SZ(100, 90), 0);
 
     s_vs_url = ui_row(list, ICON_LINK, UI_C_BLUE, "Server URL", "", url_cb, NULL);
     lv_label_set_long_mode(s_vs_url.value, LV_LABEL_LONG_MODE_DOTS);   /* up to 2 lines, then "..." */
-    lv_obj_set_height(s_vs_url.value, 2 * lv_font_get_line_height(&lv_font_montserrat_14));
+    lv_obj_set_height(s_vs_url.value, 2 * lv_font_get_line_height(UI_F_VALUE));
     s_vs_key = ui_row(list, ICON_KEY, UI_C_ORANGE, "API key", "", key_cb, NULL);
     s_vs_conn = ui_row_toggle(list, ICON_PLUG, UI_C_ORANGE, "Connection", "", voice_wants_connection(),
                               conn_cb, NULL);
@@ -547,11 +547,11 @@ static lv_obj_t *voice_settings_build(void *arg)
     lv_obj_set_flex_align(act, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(act, 18, 0);
     lv_obj_set_style_pad_top(act, 6, 0);
-    lv_obj_t *rst = ui_round_button(act, ICON_RESET, &ui_icons_20, 52, ui_pal.card, ui_pal.text_dim);
+    lv_obj_t *rst = ui_round_button(act, ICON_RESET, UI_SZ(&ui_icons_20, &ui_icons_28), UI_SZ(52, 60), ui_pal.card, ui_pal.text_dim);
     lv_obj_add_event_cb(rst, reset_server_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *nc = ui_round_button(act, ICON_COMMENT, &ui_icons_20, 52, ui_pal.card, ui_pal.text_dim);
+    lv_obj_t *nc = ui_round_button(act, ICON_COMMENT, UI_SZ(&ui_icons_20, &ui_icons_28), UI_SZ(52, 60), ui_pal.card, ui_pal.text_dim);
     lv_obj_add_event_cb(nc, new_conv_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *done = ui_round_button(act, ICON_DOWN, &ui_icons_20, 52, ui_pal.accent, lv_color_white());
+    lv_obj_t *done = ui_round_button(act, ICON_DOWN, UI_SZ(&ui_icons_20, &ui_icons_28), UI_SZ(52, 60), ui_pal.accent, lv_color_white());
     lv_obj_add_event_cb(done, done_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_add_event_cb(scr, vs_gesture_cb, LV_EVENT_GESTURE, NULL);

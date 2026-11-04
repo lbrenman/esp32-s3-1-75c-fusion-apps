@@ -37,17 +37,18 @@
 #error "The Translator needs CONFIG_LV_USE_BIDI=y and CONFIG_LV_USE_ARABIC_PERSIAN_CHARS=y. They're in sdkconfig.defaults: rm sdkconfig && idf.py set-target esp32s3, then build again."
 #endif
 
-#define ORB_SIZE        120
-#define REPLY_BIG_MAX   40          /* translations up to this many letters use the 28 px font */
-#define REPLY_MID_MAX   110         /* up to this many: 20 px; longer: 16 px */
-#define REPLY_SOLO_MIN  170         /* translations longer than this hide the original to make room */
-#define REPLY_SOLO_MIN_REPLAY 100   /* ... when the Replay button takes the bottom of the screen */
+#define ORB_SIZE        UI_SZ(120, 144)
+#define REPLY_BIG_MAX   UI_SZ(40, 64)    /* translations up to this many letters use the 28 px font */
+#define REPLY_MID_MAX   UI_SZ(110, 170)  /* up to this many: 20 px; longer: 16 px */
+#define REPLY_SOLO_MIN  UI_SZ(170, 240)  /* translations longer than this hide the original to make room */
+#define REPLY_SOLO_MIN_REPLAY UI_SZ(100, 150)   /* ... when the Replay button takes the bottom of the screen */
 #define HEARD_SHOW_MAX  120         /* the original is cut to this many letters ("...") */
-#define REPLAY_W        196         /* Replay button: big enough to hit while walking... */
-#define REPLAY_H        66
+#define REPLAY_W        UI_SZ(196, 236) /* Replay button: big enough to hit while walking... */
+#define REPLAY_H        UI_SZ(66, 74)
 #define REPLAY_EXT_PX   14          /* ...and touches this close to it count as Replay too */
-#define COL_H_FULL      262         /* text card height */
-#define COL_H_REPLAY    216         /* ... with the Replay button under it */
+#define COL_H_FULL      UI_SZ(262, 318) /* text card height */
+#define COL_H_REPLAY    UI_SZ(216, 250) /* ... with the Replay button under it */
+#define COL_TOP         UI_SZ(146, 146) /* text card top */
 
 /* teal accents, as in the web app */
 #define TR_TEAL_DARK    0x34C7B5
@@ -286,7 +287,7 @@ static void ui_update(bool force)
         strlcpy(cap, tr_lang_name(src), sizeof(cap));
         upper(cap);
         lv_label_set_text(s_ui.src_cap, cap);
-        lv_obj_set_style_text_font(s_ui.heard, font_for(heard, 16), 0);
+        lv_obj_set_style_text_font(s_ui.heard, font_for(heard, UI_SZ(16, 20)), 0);
         lv_label_set_text(s_ui.heard, heard);
         lv_obj_remove_flag(s_ui.src_cap, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_ui.heard, LV_OBJ_FLAG_HIDDEN);
@@ -415,14 +416,14 @@ static lv_obj_t *tr_build(void *arg)
     /* colored ring around the edge of the display shows the state */
     s_ui.ring = ui_status_ring(scr, 8);
 
-    s_ui.status = ui_label(scr, &lv_font_montserrat_20, ui_pal.text, "");
-    lv_obj_align(s_ui.status, LV_ALIGN_TOP_MID, 0, 50);
+    s_ui.status = ui_label(scr, UI_FONT(20, 24), ui_pal.text, "");
+    lv_obj_align(s_ui.status, LV_ALIGN_TOP_MID, 0, UI_SZ(50, 36));
 
     /* listening halo + mic orb */
     s_ui.halo = lv_obj_create(scr);
     lv_obj_remove_style_all(s_ui.halo);
     lv_obj_set_size(s_ui.halo, ORB_SIZE, ORB_SIZE);
-    lv_obj_align(s_ui.halo, LV_ALIGN_CENTER, 0, 20);
+    lv_obj_align(s_ui.halo, LV_ALIGN_CENTER, 0, UI_SZ(20, 26));
     lv_obj_set_style_radius(s_ui.halo, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(s_ui.halo, 6, 0);
     lv_obj_set_style_border_color(s_ui.halo, lv_color_hex(0xFF5A4F), 0);
@@ -430,15 +431,15 @@ static lv_obj_t *tr_build(void *arg)
     lv_obj_add_flag(s_ui.halo, LV_OBJ_FLAG_HIDDEN);
 
     s_ui.orb = ui_orb(scr, ORB_SIZE, UI_C_TRANSLATE_1, UI_C_TRANSLATE_2, ICON_MIC, &ui_icons_56);
-    lv_obj_align(s_ui.orb, LV_ALIGN_CENTER, 0, 20);
+    lv_obj_align(s_ui.orb, LV_ALIGN_CENTER, 0, UI_SZ(20, 26));
     lv_obj_remove_flag(s_ui.orb, LV_OBJ_FLAG_CLICKABLE);
 
     /* The translation card: original (small, dim) above, translation (big) below.
      * Anything that doesn't fit is clipped inside the column. */
     s_ui.col = lv_obj_create(scr);
     lv_obj_remove_style_all(s_ui.col);
-    lv_obj_set_size(s_ui.col, 330, COL_H_FULL);   /* shorter while the Replay button shows */
-    lv_obj_align(s_ui.col, LV_ALIGN_TOP_MID, 0, 146);
+    lv_obj_set_size(s_ui.col, UI_SZ(330, UI_W - 40), COL_H_FULL);   /* shorter while the Replay button shows */
+    lv_obj_align(s_ui.col, LV_ALIGN_TOP_MID, 0, COL_TOP);
     lv_obj_set_flex_flow(s_ui.col, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_ui.col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(s_ui.col, 4, 0);
@@ -447,22 +448,22 @@ static lv_obj_t *tr_build(void *arg)
     lv_obj_remove_flag(s_ui.col, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_ui.col, LV_OBJ_FLAG_HIDDEN);
 
-    s_ui.src_cap = ui_label(s_ui.col, &lv_font_montserrat_14, ui_pal.text_dim, "");
+    s_ui.src_cap = ui_label(s_ui.col, UI_FONT(14, 16), ui_pal.text_dim, "");
     lv_obj_set_style_text_letter_space(s_ui.src_cap, 1, 0);
-    s_ui.heard = ui_label(s_ui.col, &ui_font_latin_16, ui_pal.text_dim, "");
+    s_ui.heard = ui_label(s_ui.col, UI_SZ(&ui_font_latin_16, &ui_font_latin_20), ui_pal.text_dim, "");
     lv_obj_set_width(s_ui.heard, LV_PCT(100));
     lv_label_set_long_mode(s_ui.heard, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_text_align(s_ui.heard, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_pad_bottom(s_ui.heard, 10, 0);
 
-    s_ui.dst_cap = ui_label(s_ui.col, &lv_font_montserrat_14, teal(), "");
+    s_ui.dst_cap = ui_label(s_ui.col, UI_FONT(14, 16), teal(), "");
     lv_obj_set_style_text_letter_space(s_ui.dst_cap, 1, 0);
     s_ui.reply = ui_label(s_ui.col, &ui_font_latin_28, ui_pal.text, "");
     lv_obj_set_width(s_ui.reply, LV_PCT(100));
     lv_label_set_long_mode(s_ui.reply, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_text_align(s_ui.reply, LV_TEXT_ALIGN_CENTER, 0);
 
-    s_ui.col_note = ui_label(s_ui.col, &ui_font_latin_14, ui_pal.warn, "");
+    s_ui.col_note = ui_label(s_ui.col, UI_SZ(&ui_font_latin_14, &ui_font_latin_16), ui_pal.warn, "");
     lv_obj_set_width(s_ui.col_note, LV_PCT(90));
     lv_label_set_long_mode(s_ui.col_note, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_text_align(s_ui.col_note, LV_TEXT_ALIGN_CENTER, 0);
@@ -470,11 +471,11 @@ static lv_obj_t *tr_build(void *arg)
 
     dots_build(scr);
 
-    s_ui.note = ui_label(scr, &ui_font_latin_14, ui_pal.warn, "");
-    lv_obj_set_width(s_ui.note, 300);
+    s_ui.note = ui_label(scr, UI_SZ(&ui_font_latin_14, &ui_font_latin_16), ui_pal.warn, "");
+    lv_obj_set_width(s_ui.note, UI_SZ(300, UI_W - 60));
     lv_label_set_long_mode(s_ui.note, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_text_align(s_ui.note, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(s_ui.note, LV_ALIGN_CENTER, 0, 20 + ORB_SIZE / 2 + 30);
+    lv_obj_align(s_ui.note, LV_ALIGN_CENTER, 0, UI_SZ(20, 26) + ORB_SIZE / 2 + 30);
 
     /* gesture hint */
     s_ui.hint = lv_obj_create(scr);
@@ -485,12 +486,12 @@ static lv_obj_t *tr_build(void *arg)
     lv_obj_set_flex_align(s_ui.hint, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(s_ui.hint, 6, 0);
     ui_icon(s_ui.hint, &ui_icons_16, ui_pal.text_dim, ICON_UP);
-    ui_label(s_ui.hint, &lv_font_montserrat_14, ui_pal.text_dim, "Server");
-    lv_obj_t *gap = ui_label(s_ui.hint, &lv_font_montserrat_14, ui_pal.text_dim, "");
+    ui_label(s_ui.hint, UI_F_HINT, ui_pal.text_dim, "Server");
+    lv_obj_t *gap = ui_label(s_ui.hint, UI_F_HINT, ui_pal.text_dim, "");
     lv_obj_set_width(gap, 14);
     ui_icon(s_ui.hint, &ui_icons_16, ui_pal.text_dim, ICON_LEFT);
-    ui_label(s_ui.hint, &lv_font_montserrat_14, ui_pal.text_dim, "Home");
-    lv_obj_align(s_ui.hint, LV_ALIGN_BOTTOM_MID, 0, -48);
+    ui_label(s_ui.hint, UI_F_HINT, ui_pal.text_dim, "Home");
+    lv_obj_align(s_ui.hint, LV_ALIGN_BOTTOM_MID, 0, UI_SZ(-48, -36));
 
     /* invisible full-screen touch area on top of everything but the language bar */
     lv_obj_t *touch = lv_obj_create(scr);
@@ -505,8 +506,8 @@ static lv_obj_t *tr_build(void *arg)
     /* language bar: "English -> Spanish", tap for Languages (created last: it's above the touch area) */
     s_ui.bar = lv_obj_create(scr);
     lv_obj_remove_style_all(s_ui.bar);
-    lv_obj_set_size(s_ui.bar, LV_SIZE_CONTENT, 46);
-    lv_obj_align(s_ui.bar, LV_ALIGN_TOP_MID, 0, 86);
+    lv_obj_set_size(s_ui.bar, LV_SIZE_CONTENT, UI_SZ(46, 54));
+    lv_obj_align(s_ui.bar, LV_ALIGN_TOP_MID, 0, UI_SZ(86, 76));
     lv_obj_set_style_radius(s_ui.bar, 23, 0);
     lv_obj_set_style_bg_color(s_ui.bar, ui_pal.card, 0);
     lv_obj_set_style_bg_color(s_ui.bar, ui_pal.card_press, LV_STATE_PRESSED);
@@ -519,16 +520,16 @@ static lv_obj_t *tr_build(void *arg)
     lv_obj_remove_flag(s_ui.bar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(s_ui.bar, LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_add_event_cb(s_ui.bar, bar_cb, LV_EVENT_CLICKED, NULL);
-    s_ui.bar_src = ui_label(s_ui.bar, &lv_font_montserrat_20, ui_pal.text, "");
-    ui_icon(s_ui.bar, &ui_icons_16, teal(), ICON_ARROW_RIGHT);
-    s_ui.bar_dst = ui_label(s_ui.bar, &lv_font_montserrat_20, teal(), "");
+    s_ui.bar_src = ui_label(s_ui.bar, UI_FONT(20, 24), ui_pal.text, "");
+    ui_icon(s_ui.bar, UI_SZ(&ui_icons_16, &ui_icons_20), teal(), ICON_ARROW_RIGHT);
+    s_ui.bar_dst = ui_label(s_ui.bar, UI_FONT(20, 24), teal(), "");
 
     /* Replay: plays the last spoken translation again. It's above the hold-to-talk area, so a
      * touch on it (or within REPLAY_EXT_PX of it) never starts a recording. */
     s_ui.replay = lv_obj_create(scr);
     lv_obj_remove_style_all(s_ui.replay);
     lv_obj_set_size(s_ui.replay, REPLAY_W, REPLAY_H);
-    lv_obj_align(s_ui.replay, LV_ALIGN_BOTTOM_MID, 0, -30);
+    lv_obj_align(s_ui.replay, LV_ALIGN_BOTTOM_MID, 0, UI_SZ(-30, -24));
     lv_obj_set_ext_click_area(s_ui.replay, REPLAY_EXT_PX);
     lv_obj_set_style_radius(s_ui.replay, REPLAY_H / 2, 0);
     lv_obj_set_style_bg_color(s_ui.replay, lv_color_hex(UI_C_TRANSLATE_2), 0);
@@ -545,7 +546,7 @@ static lv_obj_t *tr_build(void *arg)
     lv_obj_remove_flag(s_ui.replay, LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_add_event_cb(s_ui.replay, replay_cb, LV_EVENT_CLICKED, NULL);
     ui_icon(s_ui.replay, &ui_icons_28, lv_color_white(), ICON_VOLUME);
-    ui_label(s_ui.replay, &lv_font_montserrat_22, lv_color_white(), "Replay");
+    ui_label(s_ui.replay, UI_FONT(22, 26), lv_color_white(), "Replay");
     lv_obj_add_flag(s_ui.replay, LV_OBJ_FLAG_HIDDEN);
 
     ui_update(true);
@@ -613,7 +614,7 @@ static lv_obj_t *langs_build(void *arg)
     ui_row_t sw = ui_row(list, ICON_SWAP, can ? UI_C_PURPLE : UI_C_GRAY, "Swap", v, swap_cb, NULL);
     if (!can) lv_obj_set_style_text_color(sw.title, ui_pal.text_dim, 0);
 
-    lv_obj_t *n = ui_label(list, &lv_font_montserrat_14, ui_pal.text_dim,
+    lv_obj_t *n = ui_label(list, UI_F_HINT, ui_pal.text_dim,
                            "Chinese, Japanese, Korean and Russian can be spoken but not translated into. "
                            "Text in other alphabets isn't shown on screen; the translation is still spoken.");
     lv_obj_set_width(n, UI_LIST_WIDTH - 40);
@@ -672,7 +673,7 @@ static lv_obj_t *picker_build(void *arg)
         ui_row_t r = ui_row(list, NULL, 0, l->name, value, pick_cb, (void *)ud);
         if (r.value) {
             /* Español, Русский: 14 px; العربية, हिंदी: their own fonts (16 px is the smallest) */
-            lv_obj_set_style_text_font(r.value, text_script(value) == TEXT_SCRIPT_LATIN ? &ui_font_latin_14 :
+            lv_obj_set_style_text_font(r.value, text_script(value) == TEXT_SCRIPT_LATIN ? UI_SZ(&ui_font_latin_14, &ui_font_latin_16) :
                                        font_for(value, 16), 0);
         }
         else lv_obj_set_height(r.row, 62);   /* a fixed height centers a lone title */
@@ -839,11 +840,11 @@ static lv_obj_t *server_build(void *arg)
     s_ts_scr = scr;
     lv_obj_set_user_data(scr, UI_CUSTOM_GESTURES);
     lv_obj_remove_flag(list, LV_OBJ_FLAG_SCROLLABLE);   /* vertical swipes are navigation here */
-    lv_obj_set_style_pad_top(list, 100, 0);
+    lv_obj_set_style_pad_top(list, UI_SZ(100, 90), 0);
 
     s_ts_url = ui_row(list, ICON_LINK, UI_C_BLUE, "Server URL", "", url_cb, NULL);
     lv_label_set_long_mode(s_ts_url.value, LV_LABEL_LONG_MODE_DOTS);   /* up to 2 lines, then "..." */
-    lv_obj_set_height(s_ts_url.value, 2 * lv_font_get_line_height(&lv_font_montserrat_14));
+    lv_obj_set_height(s_ts_url.value, 2 * lv_font_get_line_height(UI_F_VALUE));
     s_ts_key = ui_row(list, ICON_KEY, UI_C_ORANGE, "API key", "", key_cb, NULL);
     s_ts_conn = ui_row_toggle(list, ICON_PLUG, UI_C_ORANGE, "Connection", "", voice_wants_connection(),
                               conn_cb, NULL);
@@ -856,11 +857,11 @@ static lv_obj_t *server_build(void *arg)
     lv_obj_set_flex_align(act, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(act, 18, 0);
     lv_obj_set_style_pad_top(act, 6, 0);
-    lv_obj_t *rst = ui_round_button(act, ICON_RESET, &ui_icons_20, 52, ui_pal.card, ui_pal.text_dim);
+    lv_obj_t *rst = ui_round_button(act, ICON_RESET, UI_SZ(&ui_icons_20, &ui_icons_28), UI_SZ(52, 60), ui_pal.card, ui_pal.text_dim);
     lv_obj_add_event_cb(rst, reset_server_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *lg = ui_round_button(act, ICON_LANGUAGE, &ui_icons_20, 52, ui_pal.card, ui_pal.text_dim);
+    lv_obj_t *lg = ui_round_button(act, ICON_LANGUAGE, UI_SZ(&ui_icons_20, &ui_icons_28), UI_SZ(52, 60), ui_pal.card, ui_pal.text_dim);
     lv_obj_add_event_cb(lg, ts_langs_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *done = ui_round_button(act, ICON_DOWN, &ui_icons_20, 52, ui_pal.accent, lv_color_white());
+    lv_obj_t *done = ui_round_button(act, ICON_DOWN, UI_SZ(&ui_icons_20, &ui_icons_28), UI_SZ(52, 60), ui_pal.accent, lv_color_white());
     lv_obj_add_event_cb(done, done_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_add_event_cb(scr, ts_gesture_cb, LV_EVENT_GESTURE, NULL);

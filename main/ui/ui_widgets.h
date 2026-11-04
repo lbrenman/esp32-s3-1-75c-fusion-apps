@@ -18,6 +18,24 @@
 #define UI_LIST_WIDTH  (UI_ROUND ? 340 : UI_W - 40) /* rows and cards */
 #define UI_EXTRA_H     (UI_H - 466)                 /* extra height over the 1.75C's 466 (36 on the 2.06) */
 
+/* Sizes that differ by screen shape: UI_SZ(round, rect) and UI_FONT(round px, rect px).
+ * The round 1.75C keeps its original sizes; the 2.06's rectangle has room for bigger text and
+ * more rows (a circle is only full width across the middle). */
+#define UI_SZ(round, rect)    (UI_ROUND ? (round) : (rect))
+#define UI_FONT(round, rect)  (UI_ROUND ? &lv_font_montserrat_##round : &lv_font_montserrat_##rect)
+
+#define UI_F_TITLE     UI_FONT(24, 28)       /* list screen header */
+#define UI_F_ROW       UI_FONT(16, 20)       /* row title */
+#define UI_F_VALUE     UI_FONT(14, 16)       /* row value / status line */
+#define UI_F_SECTION   UI_FONT(14, 16)       /* section caption */
+#define UI_F_BODY      UI_FONT(16, 18)       /* toasts, dialog buttons */
+#define UI_F_HINT      UI_FONT(14, 16)       /* gesture hints, small notes */
+#define UI_ROW_H       UI_SZ(62, 74)         /* list row minimum height */
+#define UI_ROW_ICON    UI_SZ(36, 44)         /* colored icon square in a row */
+#define UI_HEADER_Y    UI_SZ(34, 22)         /* list screen header from the top */
+#define UI_LIST_TOP    UI_SZ(96, 82)         /* list content starts here */
+#define UI_LIST_BOTTOM UI_SZ(130, 70)        /* room left under the last row */
+
 lv_obj_t *ui_screen(void);
 lv_obj_t *ui_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t color, const char *text);
 lv_obj_t *ui_icon(lv_obj_t *parent, const lv_font_t *font, lv_color_t color, const char *icon);

@@ -5,7 +5,7 @@
 #define BOARD_SCREEN_W        410
 #define BOARD_SCREEN_H        502
 #define BOARD_SCREEN_ROUND    0        /* a rectangle with rounded corners */
-#define BOARD_CORNER_RADIUS   90       /* approximate radius of the panel's visible corners (px) */
+#define BOARD_CORNER_RADIUS   120      /* radius of the panel's visible corners (px), measured on the device */
 #define BOARD_LOCK_FOREVER    0        /* bsp_display_lock() timeout that waits forever */
 
 /* Takes the LVGL lock; true when it was taken. (This BSP's bsp_display_lock() returns bool.)

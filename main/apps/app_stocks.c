@@ -31,6 +31,9 @@
 #define GRID_COLS 5
 #define GRID_ROWS 5
 #define GRID_MAX  (GRID_COLS * GRID_ROWS)
+#define SYM_W     UI_SZ(62, 72)      /* symbol button size on the Pick screen */
+#define SYM_H     UI_SZ(40, 48)
+#define GRID_TOP  UI_SZ(138, 136)
 
 typedef struct {
     const char *name;
@@ -213,7 +216,7 @@ static quote_row_t make_row(int i)
     r.row = lv_obj_create(w.list);
     lv_obj_remove_style_all(r.row);
     lv_obj_set_size(r.row, UI_LIST_WIDTH, LV_SIZE_CONTENT);
-    lv_obj_set_style_min_height(r.row, 60, 0);
+    lv_obj_set_style_min_height(r.row, UI_SZ(60, 72), 0);
     lv_obj_set_style_radius(r.row, 20, 0);
     lv_obj_set_style_bg_color(r.row, ui_pal.card, 0);
     lv_obj_set_style_bg_opa(r.row, LV_OPA_COVER, 0);
@@ -237,9 +240,9 @@ static quote_row_t make_row(int i)
     lv_obj_set_flex_grow(left, 1);
     lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(left, 2, 0);
-    r.sym = ui_label(left, &lv_font_montserrat_20, ui_pal.text, "");
-    r.name = ui_label(left, &lv_font_montserrat_14, ui_pal.text_dim, "");
-    lv_obj_set_size(r.name, 150, lv_font_get_line_height(&lv_font_montserrat_14));   /* one line, then "..." */
+    r.sym = ui_label(left, UI_FONT(20, 24), ui_pal.text, "");
+    r.name = ui_label(left, UI_FONT(14, 16), ui_pal.text_dim, "");
+    lv_obj_set_size(r.name, UI_SZ(150, 190), lv_font_get_line_height(UI_FONT(14, 16)));   /* one line, then "..." */
     lv_label_set_long_mode(r.name, LV_LABEL_LONG_MODE_DOTS);
 
     lv_obj_t *right = lv_obj_create(r.row);
@@ -250,7 +253,7 @@ static quote_row_t make_row(int i)
     lv_obj_set_flex_flow(right, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(right, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
     lv_obj_set_style_pad_row(right, 4, 0);
-    r.price = ui_label(right, &lv_font_montserrat_20, ui_pal.text, "");
+    r.price = ui_label(right, UI_FONT(20, 24), ui_pal.text, "");
     r.pill = lv_obj_create(right);
     lv_obj_remove_style_all(r.pill);
     lv_obj_remove_flag(r.pill, LV_OBJ_FLAG_CLICKABLE);
@@ -259,7 +262,7 @@ static quote_row_t make_row(int i)
     lv_obj_set_style_bg_opa(r.pill, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_hor(r.pill, 8, 0);
     lv_obj_set_style_pad_ver(r.pill, 2, 0);
-    r.chg = ui_label(r.pill, &lv_font_montserrat_14, lv_color_white(), "");
+    r.chg = ui_label(r.pill, UI_FONT(14, 16), lv_color_white(), "");
     return r;
 }
 
@@ -274,11 +277,11 @@ static void fill_row(quote_row_t *r, const stocks_quote_t *q)
         fmt_price(q->price, buf, sizeof(buf));
         lv_label_set_text(r->price, buf);
         lv_obj_set_style_text_color(r->price, ui_pal.text, 0);
-        lv_obj_set_style_text_font(r->price, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_font(r->price, UI_FONT(20, 24), 0);
     } else {
         lv_label_set_text(r->price, "no quote");
         lv_obj_set_style_text_color(r->price, ui_pal.text_dim, 0);
-        lv_obj_set_style_text_font(r->price, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(r->price, UI_FONT(16, 20), 0);
     }
     if (q->has_price && (q->has_change || q->has_pct)) {
         double v = q->has_change ? q->change : q->pct;
@@ -306,14 +309,14 @@ static void set_message(const char *title, const char *text)
         w.msg = lv_obj_create(w.list);
         lv_obj_remove_style_all(w.msg);
         lv_obj_remove_flag(w.msg, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_size(w.msg, 300, LV_SIZE_CONTENT);
+        lv_obj_set_size(w.msg, UI_SZ(300, UI_W - 60), LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(w.msg, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(w.msg, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_row(w.msg, 8, 0);
         lv_obj_set_style_pad_top(w.msg, 46, 0);
         ui_icon(w.msg, &ui_icons_56, ui_pal.text_dim, ICON_CHART);
-        lv_obj_t *t = ui_label(w.msg, &lv_font_montserrat_20, ui_pal.text, "");
-        lv_obj_t *m = ui_label(w.msg, &lv_font_montserrat_14, ui_pal.text_dim, "");
+        lv_obj_t *t = ui_label(w.msg, UI_FONT(20, 24), ui_pal.text, "");
+        lv_obj_t *m = ui_label(w.msg, UI_FONT(14, 16), ui_pal.text_dim, "");
         lv_obj_set_width(m, LV_PCT(100));
         lv_label_set_long_mode(m, LV_LABEL_LONG_MODE_WRAP);
         lv_obj_set_style_text_align(m, LV_TEXT_ALIGN_CENTER, 0);
@@ -432,7 +435,7 @@ static void wl_gesture_cb(lv_event_t *e)
 
 static lv_obj_t *bottom_button(lv_obj_t *bar, const char *icon, lv_color_t bg, lv_color_t fg, lv_event_cb_t cb)
 {
-    lv_obj_t *b = ui_round_button(bar, icon, &ui_icons_20, 52, bg, fg);
+    lv_obj_t *b = ui_round_button(bar, icon, UI_SZ(&ui_icons_20, &ui_icons_28), UI_SZ(52, 60), bg, fg);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     return b;
 }
@@ -446,13 +449,13 @@ static lv_obj_t *watchlist_build(void *arg)
     w.scr = scr;
     lv_obj_set_user_data(scr, UI_CUSTOM_GESTURES);
     lv_obj_add_event_cb(scr, wl_gesture_cb, LV_EVENT_GESTURE, NULL);
-    lv_obj_set_style_pad_top(w.list, 112, 0);
+    lv_obj_set_style_pad_top(w.list, UI_SZ(112, 104), 0);
 
     /* a taller top fade, so rows scrolling up don't show through the status line */
     lv_obj_t *fade = lv_obj_create(scr);
     lv_obj_remove_style_all(fade);
     lv_obj_remove_flag(fade, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(fade, UI_W, 126);
+    lv_obj_set_size(fade, UI_W, UI_SZ(126, 116));
     lv_obj_align(fade, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(fade, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(fade, ui_pal.bg, 0);
@@ -470,7 +473,7 @@ static lv_obj_t *watchlist_build(void *arg)
         lv_obj_t *bfade = lv_obj_create(scr);
         lv_obj_remove_style_all(bfade);
         lv_obj_remove_flag(bfade, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_size(bfade, UI_W, 120);
+        lv_obj_set_size(bfade, UI_W, 110);
         lv_obj_align(bfade, LV_ALIGN_BOTTOM_MID, 0, 0);
         lv_obj_set_style_bg_opa(bfade, LV_OPA_COVER, 0);
         lv_obj_set_style_bg_color(bfade, ui_pal.bg, 0);
@@ -483,11 +486,11 @@ static lv_obj_t *watchlist_build(void *arg)
         lv_obj_move_to_index(bfade, 2);
     }
 
-    w.status = ui_label(scr, &lv_font_montserrat_14, ui_pal.text_dim, "");
-    lv_obj_set_width(w.status, 270);
+    w.status = ui_label(scr, UI_FONT(14, 16), ui_pal.text_dim, "");
+    lv_obj_set_width(w.status, UI_SZ(270, UI_W - 60));
     lv_obj_set_style_text_align(w.status, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(w.status, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_align(w.status, LV_ALIGN_TOP_MID, 0, 84);
+    lv_obj_align(w.status, LV_ALIGN_TOP_MID, 0, UI_SZ(84, 76));
 
     /* bottom: [auto refresh] [+] [gear] */
     lv_obj_t *bar = lv_obj_create(scr);
@@ -496,7 +499,7 @@ static lv_obj_t *watchlist_build(void *arg)
     lv_obj_set_size(bar, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(bar, 18, 0);
-    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -30);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, UI_SZ(-30, -24));
     w.auto_btn = bottom_button(bar, ICON_ROTATE, ui_pal.card, ui_pal.text, auto_cb);
     w.auto_icon = lv_obj_get_child(w.auto_btn, 0);
     bottom_button(bar, ICON_PLUS, ui_pal.accent, lv_color_white(), pick_cb);
@@ -554,16 +557,16 @@ static lv_obj_t *sym_button(const char *text, int i)
 {
     lv_obj_t *b = lv_obj_create(p.grid);
     lv_obj_remove_style_all(b);
-    lv_obj_set_size(b, 62, 40);
+    lv_obj_set_size(b, SYM_W, SYM_H);
     lv_obj_set_style_radius(b, 12, 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(b, ui_pal.card, 0);
     lv_obj_set_style_transform_scale(b, 235, LV_STATE_PRESSED);
-    lv_obj_set_style_transform_pivot_x(b, 31, 0);
-    lv_obj_set_style_transform_pivot_y(b, 20, 0);
+    lv_obj_set_style_transform_pivot_x(b, SYM_W / 2, 0);
+    lv_obj_set_style_transform_pivot_y(b, SYM_H / 2, 0);
     lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(b, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *l = ui_label(b, strlen(text) > 4 ? &lv_font_montserrat_14 : &lv_font_montserrat_16, ui_pal.text, text);
+    lv_obj_t *l = ui_label(b, strlen(text) > 4 ? UI_FONT(14, 16) : UI_FONT(16, 20), ui_pal.text, text);
     lv_obj_center(l);
     if (i >= 0) lv_obj_add_event_cb(b, sym_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
     return b;
@@ -625,7 +628,7 @@ static void build_grid(void)
             lv_obj_remove_flag(b, LV_OBJ_FLAG_CLICKABLE);
         }
         if (n == 0) {
-            lv_obj_t *l = ui_label(p.grid, &lv_font_montserrat_16, ui_pal.text_dim,
+            lv_obj_t *l = ui_label(p.grid, UI_FONT(16, 20), ui_pal.text_dim,
                                    s_snap.list_loaded ? "Symbols added elsewhere (for example from Claude) "
                                                         "that aren't on the other tabs show up here."
                                                       : "Loading...");
@@ -716,35 +719,35 @@ static lv_obj_t *pick_build(void *arg)
     lv_obj_t *hdr = lv_obj_create(scr);
     lv_obj_remove_style_all(hdr);
     lv_obj_remove_flag(hdr, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(hdr, LV_SIZE_CONTENT, 44);
-    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 36);
+    lv_obj_set_size(hdr, LV_SIZE_CONTENT, UI_SZ(44, 46));
+    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, UI_SZ(36, 22));
     lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(hdr, 10, 0);
-    lv_obj_t *back = ui_round_button(hdr, ICON_LEFT, &ui_icons_16, 40, ui_pal.card, ui_pal.text);
+    lv_obj_t *back = ui_round_button(hdr, ICON_LEFT, UI_SZ(&ui_icons_16, &ui_icons_20), UI_SZ(40, 46), ui_pal.card, ui_pal.text);
     lv_obj_add_event_cb(back, pick_back_cb, LV_EVENT_CLICKED, NULL);
-    ui_label(hdr, &lv_font_montserrat_24, ui_pal.text, "Pick symbols");
+    ui_label(hdr, UI_F_TITLE, ui_pal.text, "Pick symbols");
     lv_obj_t *sp = lv_obj_create(hdr);
     lv_obj_remove_style_all(sp);
-    lv_obj_set_size(sp, 40, 40);
+    lv_obj_set_size(sp, UI_SZ(40, 46), UI_SZ(40, 46));
 
     /* tabs */
     lv_obj_t *bar = lv_obj_create(scr);
     lv_obj_remove_style_all(bar);
     lv_obj_remove_flag(bar, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(bar, LV_SIZE_CONTENT, 36);
+    lv_obj_set_size(bar, LV_SIZE_CONTENT, UI_SZ(36, 42));
     lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(bar, 6, 0);
-    lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 90);
+    lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, UI_SZ(90, 80));
     for (int t = 0; t <= GROUP_COUNT; t++) {
         lv_obj_t *b = lv_obj_create(bar);
         lv_obj_remove_style_all(b);
-        lv_obj_set_size(b, t == 2 ? 92 : 72, 36);
+        lv_obj_set_size(b, t == 2 ? UI_SZ(92, 108) : UI_SZ(72, 84), UI_SZ(36, 42));
         lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
         lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_ext_click_area(b, 4);
-        lv_obj_t *l = ui_label(b, &lv_font_montserrat_14, ui_pal.text, t < GROUP_COUNT ? GROUPS[t].name : "Other");
+        lv_obj_t *l = ui_label(b, UI_FONT(14, 16), ui_pal.text, t < GROUP_COUNT ? GROUPS[t].name : "Other");
         lv_obj_center(l);
         lv_obj_add_event_cb(b, tab_cb, LV_EVENT_PRESSED, (void *)(intptr_t)t);
         p.tabs[t] = b;
@@ -755,21 +758,21 @@ static lv_obj_t *pick_build(void *arg)
     lv_obj_remove_style_all(p.grid);
     lv_obj_remove_flag(p.grid, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(p.grid, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(p.grid, GRID_COLS * 62 + (GRID_COLS - 1) * 4, GRID_ROWS * 40 + (GRID_ROWS - 1) * 6);
-    lv_obj_align(p.grid, LV_ALIGN_TOP_MID, 0, 138);
+    lv_obj_set_size(p.grid, GRID_COLS * SYM_W + (GRID_COLS - 1) * 4, GRID_ROWS * SYM_H + (GRID_ROWS - 1) * 6);
+    lv_obj_align(p.grid, LV_ALIGN_TOP_MID, 0, GRID_TOP);
     lv_obj_set_flex_flow(p.grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(p.grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_column(p.grid, 4, 0);
     lv_obj_set_style_pad_row(p.grid, 6, 0);
 
-    p.status = ui_label(scr, &lv_font_montserrat_14, ui_pal.text_dim, "");
-    lv_obj_set_width(p.status, 280);
+    p.status = ui_label(scr, UI_FONT(14, 16), ui_pal.text_dim, "");
+    lv_obj_set_width(p.status, UI_SZ(280, UI_W - 80));
     lv_obj_set_style_text_align(p.status, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(p.status, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_align(p.status, LV_ALIGN_TOP_MID, 0, 374);
+    lv_obj_align(p.status, LV_ALIGN_TOP_MID, 0, UI_SZ(374, 414));
 
-    lv_obj_t *hint = ui_label(scr, &lv_font_montserrat_12, ui_pal.text_dim, "Tap to add or remove");
-    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 398);
+    lv_obj_t *hint = ui_label(scr, UI_FONT(12, 14), ui_pal.text_dim, "Tap to add or remove");
+    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, UI_SZ(398, 442));
 
     if (s_tab > GROUP_COUNT) s_tab = 0;
     build_grid();
@@ -793,7 +796,7 @@ typedef struct {
 
 static quote_ui_t qv;
 
-#define BAR_W 240
+#define BAR_W UI_SZ(240, 290)
 
 static const stocks_quote_t *row_for(const char *sym)
 {
@@ -948,15 +951,15 @@ static lv_obj_t *stat_card(lv_obj_t *parent, const char *title, lv_obj_t **value
     lv_obj_remove_style_all(c);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(c, 146, 60);
+    lv_obj_set_size(c, UI_SZ(146, 172), UI_SZ(60, 72));
     lv_obj_set_style_radius(c, 16, 0);
     lv_obj_set_style_bg_color(c, ui_pal.card, 0);
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
     lv_obj_set_flex_flow(c, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(c, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(c, 2, 0);
-    ui_label(c, &lv_font_montserrat_14, ui_pal.text_dim, title);
-    *value = ui_label(c, &lv_font_montserrat_20, ui_pal.text, "...");
+    ui_label(c, UI_FONT(14, 16), ui_pal.text_dim, title);
+    *value = ui_label(c, UI_FONT(20, 24), ui_pal.text, "...");
     return c;
 }
 
@@ -972,26 +975,26 @@ static lv_obj_t *quote_build(void *arg)
     lv_obj_t *hdr = lv_obj_create(scr);
     lv_obj_remove_style_all(hdr);
     lv_obj_remove_flag(hdr, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(hdr, LV_SIZE_CONTENT, 44);
-    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 34);
+    lv_obj_set_size(hdr, LV_SIZE_CONTENT, UI_SZ(44, 46));
+    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, UI_HEADER_Y);
     lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(hdr, 10, 0);
-    lv_obj_t *back = ui_round_button(hdr, ICON_LEFT, &ui_icons_16, 40, ui_pal.card, ui_pal.text);
+    lv_obj_t *back = ui_round_button(hdr, ICON_LEFT, UI_SZ(&ui_icons_16, &ui_icons_20), UI_SZ(40, 46), ui_pal.card, ui_pal.text);
     lv_obj_add_event_cb(back, quote_back_cb, LV_EVENT_CLICKED, NULL);
-    ui_label(hdr, &lv_font_montserrat_24, ui_pal.text, s_quote_sym);
+    ui_label(hdr, UI_F_TITLE, ui_pal.text, s_quote_sym);
     lv_obj_t *sp = lv_obj_create(hdr);
     lv_obj_remove_style_all(sp);
-    lv_obj_set_size(sp, 40, 40);
+    lv_obj_set_size(sp, UI_SZ(40, 46), UI_SZ(40, 46));
 
-    qv.name = ui_label(scr, &lv_font_montserrat_16, ui_pal.text_dim, "");
-    lv_obj_set_size(qv.name, 290, lv_font_get_line_height(&lv_font_montserrat_16));
+    qv.name = ui_label(scr, UI_FONT(16, 20), ui_pal.text_dim, "");
+    lv_obj_set_size(qv.name, UI_SZ(290, UI_W - 60), lv_font_get_line_height(UI_FONT(16, 20)));
     lv_label_set_long_mode(qv.name, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_align(qv.name, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(qv.name, LV_ALIGN_TOP_MID, 0, 84);
+    lv_obj_align(qv.name, LV_ALIGN_TOP_MID, 0, UI_SZ(84, 80));
 
     qv.price = ui_label(scr, &lv_font_montserrat_44, ui_pal.text, "...");
-    lv_obj_align(qv.price, LV_ALIGN_TOP_MID, 0, 106);
+    lv_obj_align(qv.price, LV_ALIGN_TOP_MID, 0, UI_SZ(106, 110));
 
     qv.pill = lv_obj_create(scr);
     lv_obj_remove_style_all(qv.pill);
@@ -1001,8 +1004,8 @@ static lv_obj_t *quote_build(void *arg)
     lv_obj_set_style_bg_opa(qv.pill, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_hor(qv.pill, 12, 0);
     lv_obj_set_style_pad_ver(qv.pill, 3, 0);
-    qv.chg = ui_label(qv.pill, &lv_font_montserrat_16, lv_color_white(), "");
-    lv_obj_align(qv.pill, LV_ALIGN_TOP_MID, 0, 162);
+    qv.chg = ui_label(qv.pill, UI_FONT(16, 20), lv_color_white(), "");
+    lv_obj_align(qv.pill, LV_ALIGN_TOP_MID, 0, UI_SZ(162, 170));
 
     /* open | previous close */
     lv_obj_t *cards = lv_obj_create(scr);
@@ -1011,7 +1014,7 @@ static lv_obj_t *quote_build(void *arg)
     lv_obj_set_size(cards, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(cards, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(cards, 10, 0);
-    lv_obj_align(cards, LV_ALIGN_TOP_MID, 0, 202);
+    lv_obj_align(cards, LV_ALIGN_TOP_MID, 0, UI_SZ(202, 216));
     stat_card(cards, "Open", &qv.open_v);
     stat_card(cards, "Prev close", &qv.prev_v);
 
@@ -1019,9 +1022,9 @@ static lv_obj_t *quote_build(void *arg)
     qv.range = lv_obj_create(scr);
     lv_obj_remove_style_all(qv.range);
     lv_obj_remove_flag(qv.range, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(qv.range, BAR_W + 40, 70);
-    lv_obj_align(qv.range, LV_ALIGN_TOP_MID, 0, 274);
-    lv_obj_t *rt = ui_label(qv.range, &lv_font_montserrat_14, ui_pal.text_dim, "Day range");
+    lv_obj_set_size(qv.range, BAR_W + 40, UI_SZ(70, 76));
+    lv_obj_align(qv.range, LV_ALIGN_TOP_MID, 0, UI_SZ(274, 304));
+    lv_obj_t *rt = ui_label(qv.range, UI_FONT(14, 16), ui_pal.text_dim, "Day range");
     lv_obj_align(rt, LV_ALIGN_TOP_MID, 0, 0);
     qv.bar = lv_obj_create(qv.range);
     lv_obj_remove_style_all(qv.bar);
@@ -1030,7 +1033,7 @@ static lv_obj_t *quote_build(void *arg)
     lv_obj_set_style_radius(qv.bar, 4, 0);
     lv_obj_set_style_bg_color(qv.bar, ui_pal.card_press, 0);
     lv_obj_set_style_bg_opa(qv.bar, LV_OPA_COVER, 0);
-    lv_obj_align(qv.bar, LV_ALIGN_TOP_MID, 0, 28);
+    lv_obj_align(qv.bar, LV_ALIGN_TOP_MID, 0, UI_SZ(28, 30));
     qv.fill = lv_obj_create(qv.bar);
     lv_obj_remove_style_all(qv.fill);
     lv_obj_remove_flag(qv.fill, LV_OBJ_FLAG_CLICKABLE);
@@ -1046,17 +1049,17 @@ static lv_obj_t *quote_build(void *arg)
     lv_obj_set_style_bg_color(qv.dot, ui_pal.text, 0);
     lv_obj_set_style_bg_opa(qv.dot, LV_OPA_COVER, 0);
     lv_obj_set_pos(qv.dot, 20 - 8, 28 - 4);
-    qv.lo = ui_label(qv.range, &lv_font_montserrat_14, ui_pal.text_dim, "");
-    lv_obj_align(qv.lo, LV_ALIGN_TOP_LEFT, 20, 44);
-    qv.hi = ui_label(qv.range, &lv_font_montserrat_14, ui_pal.text_dim, "");
-    lv_obj_align(qv.hi, LV_ALIGN_TOP_RIGHT, -20, 44);
+    qv.lo = ui_label(qv.range, UI_FONT(14, 16), ui_pal.text_dim, "");
+    lv_obj_align(qv.lo, LV_ALIGN_TOP_LEFT, 20, UI_SZ(44, 48));
+    qv.hi = ui_label(qv.range, UI_FONT(14, 16), ui_pal.text_dim, "");
+    lv_obj_align(qv.hi, LV_ALIGN_TOP_RIGHT, -20, UI_SZ(44, 48));
     lv_obj_add_flag(qv.range, LV_OBJ_FLAG_HIDDEN);
 
-    qv.status = ui_label(scr, &lv_font_montserrat_14, ui_pal.text_dim, "");
-    lv_obj_set_width(qv.status, 300);
+    qv.status = ui_label(scr, UI_FONT(14, 16), ui_pal.text_dim, "");
+    lv_obj_set_width(qv.status, UI_SZ(300, UI_W - 60));
     lv_obj_set_style_text_align(qv.status, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(qv.status, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_align(qv.status, LV_ALIGN_TOP_MID, 0, 352);
+    lv_obj_align(qv.status, LV_ALIGN_TOP_MID, 0, UI_SZ(352, 390));
 
     /* bottom: [refresh] [remove] */
     lv_obj_t *bar = lv_obj_create(scr);
@@ -1065,10 +1068,10 @@ static lv_obj_t *quote_build(void *arg)
     lv_obj_set_size(bar, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(bar, 18, 0);
-    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -30);
-    lv_obj_t *rb = ui_round_button(bar, ICON_ROTATE, &ui_icons_20, 52, ui_pal.card, ui_pal.text);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, UI_SZ(-30, -24));
+    lv_obj_t *rb = ui_round_button(bar, ICON_ROTATE, UI_SZ(&ui_icons_20, &ui_icons_28), UI_SZ(52, 60), ui_pal.card, ui_pal.text);
     lv_obj_add_event_cb(rb, quote_refresh_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *xb = ui_round_button(bar, ICON_TRASH, &ui_icons_20, 52, ui_pal.card, ui_pal.err);
+    lv_obj_t *xb = ui_round_button(bar, ICON_TRASH, UI_SZ(&ui_icons_20, &ui_icons_28), UI_SZ(52, 60), ui_pal.card, ui_pal.err);
     lv_obj_add_event_cb(xb, quote_remove_cb, LV_EVENT_CLICKED, NULL);
 
     stocks_request_detail(s_quote_sym);
@@ -1193,7 +1196,7 @@ static lv_obj_t *server_build(void *arg)
 
     ui_section(list, "FUSION MCP SERVER");
     s_sv_url = ui_row(list, ICON_LINK, UI_C_BLUE, "Server URL", "", sv_url_cb, NULL);
-    lv_obj_set_height(s_sv_url.value, 2 * lv_font_get_line_height(&lv_font_montserrat_14));
+    lv_obj_set_height(s_sv_url.value, 2 * lv_font_get_line_height(UI_F_VALUE));
     s_sv_key = ui_row(list, ICON_KEY, UI_C_ORANGE, "API key", "", sv_key_cb, NULL);
     s_sv_status = ui_row(list, ICON_PLUG, UI_C_ORANGE, "Status", "", NULL, NULL);
     lv_label_set_long_mode(s_sv_status.value, LV_LABEL_LONG_MODE_WRAP);

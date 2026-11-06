@@ -15,6 +15,8 @@
  *   1.75C  the BSP uses Espressif's LVGL adapter (esp_lv_adapter)
  *   2.06   the BSP uses esp_lvgl_port. Its own bsp_display_start() takes the band height from
  *          Kconfig and allocates a single buffer; here it's double-buffered like on the 1.75C.
+ *          It also gets a flush guard (see flush_wait_guard): esp_lvgl_port ignores a failed SPI
+ *          transfer, and LVGL would then wait for that band forever (screen frozen, task watchdog).
  */
 
 #include "esp_log.h"
@@ -23,6 +25,11 @@
 #include "bsp/touch.h"
 #if APP_BOARD_2_06
 #include "esp_lvgl_port.h"
+#include "lvgl_private.h"         /* disp->flushing, for the flush guard */
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_timer.h"
+#include "esp_heap_caps.h"
 #else
 #include "esp_lv_adapter.h"
 #endif
@@ -45,6 +52,43 @@ static void rounder_event_cb(lv_event_t *e)
 
 #if APP_BOARD_2_06
 /* ---------------------------------------------------------------- ESP32-S3-Touch-AMOLED-2.06 */
+
+/* Flush guard. Each band goes to the panel over SPI, which needs a DMA buffer from internal RAM.
+ * If there isn't one ("spi transmit (queue) color failed"), esp_lvgl_port drops the error and the
+ * "transfer done" callback never comes, so LVGL's own wait (while (flushing);) never ends: the
+ * screen freezes and the task watchdog fires. This wait gives up after FLUSH_GUARD_MS instead,
+ * logs it, and repaints the screen a moment later (the lost band is redrawn). */
+#define FLUSH_GUARD_MS    250
+#define FLUSH_SPIN_US     3000          /* a normal band takes well under 1 ms: spin first, then sleep */
+
+static volatile uint32_t s_flush_lost;
+static uint32_t          s_flush_lost_seen;
+
+static void flush_wait_guard(lv_display_t *disp)
+{
+    int64_t start = esp_timer_get_time();
+    while (disp->flushing) {
+        int64_t waited = esp_timer_get_time() - start;
+        if (waited > (int64_t)FLUSH_GUARD_MS * 1000) {
+            s_flush_lost++;
+            ESP_LOGW(TAG, "A display transfer never finished (no DMA memory?); skipped it (%u so far). "
+                     "Internal RAM free %u KB, largest DMA block %u KB", (unsigned)s_flush_lost,
+                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                     (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) / 1024));
+            return;                       /* LVGL clears disp->flushing and goes on */
+        }
+        if (waited > FLUSH_SPIN_US) vTaskDelay(1);   /* lets the idle task (and its watchdog) run */
+    }
+}
+
+/* after a lost band: repaint the whole screen once things have calmed down */
+static void flush_repair_timer_cb(lv_timer_t *t)
+{
+    if (s_flush_lost == s_flush_lost_seen) return;
+    s_flush_lost_seen = s_flush_lost;
+    lv_obj_invalidate(lv_screen_active());
+}
+
 lv_display_t *app_display_start(void)
 {
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
@@ -87,6 +131,11 @@ lv_display_t *app_display_start(void)
         return NULL;
     }
     lv_display_add_event_cb(disp, rounder_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
+    if (lvgl_port_lock(0)) {
+        lv_display_set_flush_wait_cb(disp, flush_wait_guard);
+        lv_timer_create(flush_repair_timer_cb, 500, NULL);
+        lvgl_port_unlock();
+    }
 
     esp_lcd_touch_handle_t tp = NULL;
     if (bsp_touch_new(NULL, &tp) == ESP_OK && tp) {

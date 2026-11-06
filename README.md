@@ -145,8 +145,11 @@ your request). Everything runs on the board; nothing is sent until you've said t
   of "Jarvis", a click) doesn't count. With `WAKE_DEBUG 1` the log shows
   `voice: listen: vad=1 level=-38 dB (voice above -52) -> voice` four times a second while
   listening, which is how to tune `WAKE_LEVEL_*` in `voice_core.c` if it ends too early or late.
-- It needs about 20-30 KB of internal RAM. If less than `WAKE_MIN_FREE_INTERNAL_KB` would be left
-  for the display, it turns itself off for this visit ("Wake word off: low memory", Settings shows
+- It needs about 15 KB of internal RAM. Before starting it checks there's room for it plus
+  `WAKE_MIN_FREE_INTERNAL_KB` left over, and a DMA block `WAKE_START_DMA_MARGIN_KB` bigger than
+  `WAKE_MIN_DMA_BLOCK_KB`; if not, it doesn't start. On the 2.06 there often isn't (an attempt
+  once took the display's DMA buffer and froze the screen). If less than `WAKE_MIN_FREE_INTERNAL_KB`
+  is left once it's running, it turns itself off for this visit ("Wake word off: low memory", Settings shows
   "Paused: low memory") and hold to talk keeps working. The log says how much it took.
 - Another built-in word ("Computer", "Hi ESP", "Alexa"...): see "Settings you might change".
 
@@ -968,4 +971,6 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app
 | 2.06: built the 1.75C by mistake (`display: Display started (ESP32-S3-Touch-AMOLED-1.75C ...` on a 2.06) | The board is remembered per build folder; `build/` is the 1.75C | Build with `-B build_2_06` (and `-D BOARD=2_06` the first time) |
 | 2.06: screen stays black, touch or audio dead | Board package difference not caught in the preview | Send the boot log (`display`, `voice`, `power` lines); the board layer is `main/display_start.c` and `boards/2_06/` |
 | Opening Settings restarts the board (`Stack canary watchpoint triggered (LVGL)` or `stack overflow in task LVGL`) | The LVGL task's 8 KB stack (2.06) ran out while building the screen | Fixed by keeping the screens' settings copies off the stack (`static app_settings_t cfg` in `app_settings.c`, `app_voice.c`, `web_settings.c`). If it comes back, raise `port_cfg.task_stack` in `main/display_start.c` |
+| Screen freezes, then `task_wdt: ... CPU 0: taskLVGL` with `wait_for_flushing` in the backtrace, after `spi transmit (queue) color failed` (2.06) | A band couldn't get its internal DMA buffer and esp_lvgl_port never reported it done, so LVGL waited forever | Fixed with a flush guard in `main/display_start.c`: after 250 ms it logs `A display transfer never finished ... skipped it` and repaints. If that line shows up often, internal RAM is short (see the numbers it logs) |
+| "Wake word off: low memory" as soon as Voice chat or Voice AI opens; log `not enough internal RAM to start it (NN KB free, largest DMA block NN KB ...)` | The wake word engine needs about 15 KB of internal RAM and would leave too little for the display's DMA buffers (common on the 2.06) | Hold to talk and tap still work. The engine is no longer started when it can't fit (`WAKE_START_COST_KB`, `WAKE_START_DMA_MARGIN_KB`) |
 | No battery level on Home | The AXP2101 didn't answer on I2C (`power:` lines in the log) | Check the log line; the rest of the app works without it |

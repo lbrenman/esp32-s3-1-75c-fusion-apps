@@ -1831,6 +1831,17 @@ static bool wake_start(void)
 {
     size_t free0, dma0;
     free_internal(&free0, &dma0);
+    if (free0 < WAKE_MIN_FREE_INTERNAL_KB + WAKE_START_COST_KB ||
+        dma0 < WAKE_MIN_DMA_BLOCK_KB + WAKE_START_DMA_MARGIN_KB) {
+        /* Not even trying: starting the engine here would take the DMA memory the display needs
+         * for its next band (on the 2.06 that once froze the screen). Hold to talk still works. */
+        ESP_LOGW(TAG, "Wake word off: not enough internal RAM to start it (%u KB free, largest DMA block %u KB; "
+                 "needs %d KB and %d KB, see WAKE_* in app_config.h)", (unsigned)free0, (unsigned)dma0,
+                 WAKE_MIN_FREE_INTERNAL_KB + WAKE_START_COST_KB, WAKE_MIN_DMA_BLOCK_KB + WAKE_START_DMA_MARGIN_KB);
+        s_wake_nomem = true;
+        set_note("Wake word off: low memory");
+        return false;
+    }
 
     afe_config_t *cfg = afe_config_init("M", s_models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
     if (!cfg) {

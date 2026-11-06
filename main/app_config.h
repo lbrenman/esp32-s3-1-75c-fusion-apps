@@ -46,6 +46,11 @@
  * after it starts, it turns itself off and Voice chat goes back to hold to talk (see the log). */
 #define WAKE_MIN_FREE_INTERNAL_KB  20
 #define WAKE_MIN_DMA_BLOCK_KB      12
+/* Checked BEFORE the engine starts, so it doesn't take RAM the display is about to need: about
+ * what the engine takes (15 KB measured), and how much bigger than WAKE_MIN_DMA_BLOCK_KB the
+ * largest DMA block has to be. If there isn't that much, the wake word stays off for this visit. */
+#define WAKE_START_COST_KB         15
+#define WAKE_START_DMA_MARGIN_KB   8
 
 /* Waiting beep: while a voice app waits for the server's reply ("Thinking..." / "Translating..."),
  * a short, quiet tone plays every THINK_BEEP_PERIOD_MS, so you know it's still working. It starts

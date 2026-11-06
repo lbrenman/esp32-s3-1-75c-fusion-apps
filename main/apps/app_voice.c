@@ -405,11 +405,10 @@ static lv_timer_t *s_vs_timer;
 
 static void vs_refresh(void)
 {
-    app_settings_t cfg;
-    settings_get(&cfg);
-    lv_label_set_text(s_vs_url.value, fl_url(&cfg)[0] ? fl_url(&cfg) : "Not set");
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    lv_label_set_text(s_vs_url.value, fl_url(cfg)[0] ? fl_url(cfg) : "Not set");
     char masked[48];
-    ui_mask_secret(fl_key(&cfg), masked, sizeof(masked), true);
+    ui_mask_secret(fl_key(cfg), masked, sizeof(masked), true);
     lv_label_set_text(s_vs_key.value, masked);
 
     voice_state_t st = voice_state();
@@ -448,10 +447,9 @@ static bool url_saved(const char *text, void *user)
         ui_toast(s_fl->rest ? "Start the URL with https://" : "Start the URL with wss://");
         return true;                       /* stay in the editor */
     }
-    app_settings_t cfg;
-    settings_get(&cfg);
-    strlcpy(fl_url(&cfg), text, SET_URL_MAX + 1);
-    settings_set(&cfg);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    strlcpy(fl_url(cfg), text, SET_URL_MAX + 1);
+    settings_set(cfg);
     voice_reconnect();
     ui_toast(s_fl->rest ? "Saved" : "Saved - reconnecting");
     return false;
@@ -459,10 +457,9 @@ static bool url_saved(const char *text, void *user)
 
 static bool key_saved(const char *text, void *user)
 {
-    app_settings_t cfg;
-    settings_get(&cfg);
-    strlcpy(fl_key(&cfg), text, SET_KEY_MAX + 1);
-    settings_set(&cfg);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    strlcpy(fl_key(cfg), text, SET_KEY_MAX + 1);
+    settings_set(cfg);
     voice_reconnect();
     ui_toast(s_fl->rest ? "Saved" : "Saved - reconnecting");
     return false;
@@ -471,10 +468,9 @@ static bool key_saved(const char *text, void *user)
 static void url_cb(lv_event_t *e)
 {
     if (ui_nav_busy()) return;
-    app_settings_t cfg;
-    settings_get(&cfg);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
     ui_editor_cfg_t ed = {
-        .title = "Server URL", .icon = ICON_LINK, .initial = fl_url(&cfg),
+        .title = "Server URL", .icon = ICON_LINK, .initial = fl_url(cfg),
         .placeholder = s_fl->rest ? "https://host:port/voice-ai-chat-api" : "wss://host:port/path", .max_len = SET_URL_MAX, .on_save = url_saved,
     };
     ui_editor_open(&ed, false);
@@ -483,10 +479,9 @@ static void url_cb(lv_event_t *e)
 static void key_cb(lv_event_t *e)
 {
     if (ui_nav_busy()) return;
-    app_settings_t cfg;
-    settings_get(&cfg);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
     ui_editor_cfg_t ed = {
-        .title = "API key", .icon = ICON_KEY, .initial = fl_key(&cfg),
+        .title = "API key", .icon = ICON_KEY, .initial = fl_key(cfg),
         .placeholder = "x-api-key", .max_len = SET_KEY_MAX, .password = true, .on_save = key_saved,
     };
     ui_editor_open(&ed, false);
@@ -501,10 +496,9 @@ static void conn_cb(lv_event_t *e)
 static void reset_server_cb(lv_event_t *e)
 {
     if (ui_nav_busy()) return;
-    app_settings_t cfg;
-    settings_get(&cfg);
-    strlcpy(fl_url(&cfg), fl_default_url(), SET_URL_MAX + 1);
-    settings_set(&cfg);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    strlcpy(fl_url(cfg), fl_default_url(), SET_URL_MAX + 1);
+    settings_set(cfg);
     voice_reconnect();
     vs_refresh();
     ui_toast("URL reset to secrets.h");

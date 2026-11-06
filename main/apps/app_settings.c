@@ -66,9 +66,8 @@ static void status_text(char *buf, size_t len)
 static void refresh_rows(void)
 {
     if (!s_scr) return;
-    app_settings_t cfg;
-    settings_get(&cfg);
-    lv_label_set_text(s_net_row.value, cfg.wifi_ssid[0] ? ssid_text(cfg.wifi_ssid) : "Not set");
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    lv_label_set_text(s_net_row.value, cfg->wifi_ssid[0] ? ssid_text(cfg->wifi_ssid) : "Not set");
     char buf[64];
     status_text(buf, sizeof(buf));
     lv_label_set_text(s_status_row.value, buf);
@@ -129,11 +128,10 @@ static void delete_cb(lv_event_t *e)
 
 static void apply_wifi(const char *ssid, const char *pass)
 {
-    app_settings_t cfg;
-    settings_get(&cfg);
-    strlcpy(cfg.wifi_ssid, ssid, sizeof(cfg.wifi_ssid));
-    strlcpy(cfg.wifi_pass, pass, sizeof(cfg.wifi_pass));
-    settings_set(&cfg);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    strlcpy(cfg->wifi_ssid, ssid, sizeof(cfg->wifi_ssid));
+    strlcpy(cfg->wifi_pass, pass, sizeof(cfg->wifi_pass));
+    settings_set(cfg);
     net_reconnect();
     char msg[64];
     snprintf(msg, sizeof(msg), "Connecting to %s", ssid_text(ssid));
@@ -152,14 +150,13 @@ static bool password_saved(const char *text, void *user)
 static void open_password_editor(const char *ssid, bool replace, int pop_after)
 {
     strlcpy(s_pending_ssid, ssid, sizeof(s_pending_ssid));
-    app_settings_t cfg;
-    settings_get(&cfg);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
     char title[64];
     snprintf(title, sizeof(title), "%s", ssid_text(ssid));
     ui_editor_cfg_t ed = {
         .title = title,
         .icon = ICON_LOCK,
-        .initial = strcmp(cfg.wifi_ssid, ssid) == 0 ? cfg.wifi_pass : "",
+        .initial = strcmp(cfg->wifi_ssid, ssid) == 0 ? cfg->wifi_pass : "",
         .placeholder = "Wi-Fi password",
         .max_len = SET_PASS_MAX,
         .password = true,
@@ -213,13 +210,12 @@ static void scan_again_cb(lv_event_t *e);
 static void scan_fill(const net_ap_t *aps, int n)
 {
     lv_obj_clean(s_scan_list);
-    app_settings_t cfg;
-    settings_get(&cfg);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
     ui_section(s_scan_list, n ? "NETWORKS" : "NO NETWORKS FOUND");
     for (int i = 0; i < n; i++) {
         char val[40];
         const char *quality = aps[i].rssi > -60 ? "Excellent" : aps[i].rssi > -70 ? "Good" : aps[i].rssi > -80 ? "Fair" : "Weak";
-        bool current = strcmp(aps[i].ssid, cfg.wifi_ssid) == 0;
+        bool current = strcmp(aps[i].ssid, cfg->wifi_ssid) == 0;
         snprintf(val, sizeof(val), "%s%s, %s", current ? "Current, " : "", aps[i].secure ? "Secured" : "Open", quality);
         uint32_t c = aps[i].rssi > -70 ? UI_C_BLUE : aps[i].rssi > -80 ? UI_C_ORANGE : UI_C_GRAY;
         ui_row(s_scan_list, aps[i].secure ? ICON_LOCK : ICON_WIFI, c, ssid_text(aps[i].ssid), val, scan_pick_cb, (void *)&aps[i]);
@@ -294,23 +290,21 @@ static void net_row_cb(lv_event_t *e)
 static void pass_row_cb(lv_event_t *e)
 {
     if (ui_nav_busy()) return;
-    app_settings_t cfg;
-    settings_get(&cfg);
-    if (!cfg.wifi_ssid[0]) {
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    if (!cfg->wifi_ssid[0]) {
         ui_toast("Choose a network first");
         return;
     }
-    open_password_editor(cfg.wifi_ssid, false, 1);
+    open_password_editor(cfg->wifi_ssid, false, 1);
 }
 
 static void dark_cb(lv_event_t *e)
 {
     lv_obj_t *sw = lv_event_get_target_obj(e);
-    app_settings_t cfg;
-    settings_get(&cfg);
-    cfg.dark_mode = lv_obj_has_state(sw, LV_STATE_CHECKED);
-    settings_set(&cfg);
-    ui_theme_set_dark(cfg.dark_mode);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    cfg->dark_mode = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    settings_set(cfg);
+    ui_theme_set_dark(cfg->dark_mode);
     s_keep_scroll = lv_obj_get_scroll_y(s_list);
     ui_nav_refresh();
 }
@@ -322,10 +316,9 @@ static void bright_cb(lv_event_t *e)
     if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
         bsp_display_brightness_set(v);
     } else {                                   /* released: save */
-        app_settings_t cfg;
-        settings_get(&cfg);
-        cfg.brightness = (uint8_t)v;
-        settings_set(&cfg);
+        SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+        cfg->brightness = (uint8_t)v;
+        settings_set(cfg);
     }
 }
 
@@ -336,10 +329,9 @@ static void volume_cb(lv_event_t *e)
     if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
         voice_set_volume(v);
     } else {
-        app_settings_t cfg;
-        settings_get(&cfg);
-        cfg.volume = (uint8_t)v;
-        settings_set(&cfg);
+        SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+        cfg->volume = (uint8_t)v;
+        settings_set(cfg);
     }
 }
 
@@ -351,16 +343,14 @@ static void conv_text(const char *id, char *buf, size_t len)
 
 static void conv_label(char *buf, size_t len)
 {
-    app_settings_t cfg;
-    settings_get(&cfg);
-    conv_text(cfg.conversation_id, buf, len);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    conv_text(cfg->conversation_id, buf, len);
 }
 
 static void ai_conv_label(char *buf, size_t len)
 {
-    app_settings_t cfg;
-    settings_get(&cfg);
-    conv_text(cfg.ai_conversation_id, buf, len);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    conv_text(cfg->ai_conversation_id, buf, len);
 }
 
 static ui_row_t s_conv_row, s_ai_conv_row;
@@ -388,10 +378,9 @@ static void refresh_wake_row(void)
 static void wake_cb(lv_event_t *e)
 {
     bool on = lv_obj_has_state(lv_event_get_target_obj(e), LV_STATE_CHECKED);
-    app_settings_t cfg;
-    settings_get(&cfg);
-    cfg.wake_word = on;
-    settings_set(&cfg);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    cfg->wake_word = on;
+    settings_set(cfg);
     voice_set_wake_word(on);
     refresh_wake_row();
 }
@@ -436,18 +425,17 @@ static void restart_cb(lv_event_t *e)
 static void do_reset(void *user)
 {
     settings_reset();
-    app_settings_t cfg;
-    settings_get(&cfg);
-    bsp_display_brightness_set(cfg.brightness);
-    voice_set_volume(cfg.volume);
-    voice_set_wake_word(cfg.wake_word);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    bsp_display_brightness_set(cfg->brightness);
+    voice_set_volume(cfg->volume);
+    voice_set_wake_word(cfg->wake_word);
     web_settings_sign_out_all();           /* the reset made a new PIN */
-    web_settings_set_enabled(cfg.web_enabled);
+    web_settings_set_enabled(cfg->web_enabled);
     net_reconnect();
     voice_reconnect();
-    stocks_set_auto(cfg.stocks_auto);
+    stocks_set_auto(cfg->stocks_auto);
     stocks_config_changed();
-    ui_theme_set_dark(cfg.dark_mode);
+    ui_theme_set_dark(cfg->dark_mode);
     s_keep_scroll = -1;
     ui_nav_refresh();
     ui_toast("Settings reset");
@@ -468,17 +456,15 @@ static ui_row_t        s_web_pin_row;
 
 static void pin_text(char *buf, size_t len)
 {
-    app_settings_t cfg;
-    settings_get(&cfg);
-    snprintf(buf, len, "%.3s %.3s", cfg.web_pin, strlen(cfg.web_pin) > 3 ? cfg.web_pin + 3 : "");
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    snprintf(buf, len, "%.3s %.3s", cfg->web_pin, strlen(cfg->web_pin) > 3 ? cfg->web_pin + 3 : "");
 }
 
 static void refresh_web_rows(void)
 {
     if (!s_scr || !s_web_row.value) return;
-    app_settings_t cfg;
-    settings_get(&cfg);
-    bool on = cfg.web_enabled;
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    bool on = cfg->web_enabled;
     char buf[48];
     uint32_t c = UI_C_GRAY;
     if (!on) {
@@ -547,8 +533,7 @@ void app_settings_refresh(void)
 
 static lv_obj_t *settings_build(void *arg)
 {
-    app_settings_t cfg;
-    settings_get(&cfg);
+    SETTINGS_COPY(cfg);              /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
 
     lv_obj_t *scr;
     lv_obj_t *list = ui_list_screen(&scr, "Settings", true);
@@ -556,25 +541,25 @@ static lv_obj_t *settings_build(void *arg)
     s_list = list;
 
     ui_section(list, "WI-FI");
-    s_net_row = ui_row(list, ICON_WIFI, UI_C_BLUE, "Network", ssid_text(cfg.wifi_ssid), net_row_cb, NULL);
+    s_net_row = ui_row(list, ICON_WIFI, UI_C_BLUE, "Network", ssid_text(cfg->wifi_ssid), net_row_cb, NULL);
     char masked[48];
-    ui_mask_secret(cfg.wifi_pass, masked, sizeof(masked), false);
+    ui_mask_secret(cfg->wifi_pass, masked, sizeof(masked), false);
     ui_row(list, ICON_KEY, UI_C_ORANGE, "Password", masked, pass_row_cb, NULL);
     s_status_row = ui_row(list, ICON_SIGNAL, UI_C_GREEN, "Status", "", NULL, NULL);
 
     ui_section(list, "DISPLAY");
-    ui_row_switch(list, ICON_MOON, UI_C_INDIGO, "Dark mode", cfg.dark_mode, dark_cb, NULL);
-    ui_row_slider(list, ICON_SUN, UI_C_ORANGE, "Brightness", 5, 100, cfg.brightness, bright_cb, NULL);
+    ui_row_switch(list, ICON_MOON, UI_C_INDIGO, "Dark mode", cfg->dark_mode, dark_cb, NULL);
+    ui_row_slider(list, ICON_SUN, UI_C_ORANGE, "Brightness", 5, 100, cfg->brightness, bright_cb, NULL);
 
     ui_section(list, "SOUND");
-    ui_row_slider(list, ICON_VOLUME, UI_C_RED, "Volume", 0, 100, cfg.volume, volume_cb, NULL);
+    ui_row_slider(list, ICON_VOLUME, UI_C_RED, "Volume", 0, 100, cfg->volume, volume_cb, NULL);
 
     ui_section(list, "VOICE CHAT");
     char conv[32];
     conv_label(conv, sizeof(conv));
     s_conv_row = ui_row(list, ICON_COMMENT, UI_C_PURPLE, "Conversation", conv, NULL, NULL);
     ui_row(list, ICON_PEN, UI_C_PURPLE, "New conversation", NULL, new_conv_cb, NULL);
-    s_wake_row = ui_row_toggle(list, ICON_WAVE, UI_C_PURPLE, "Wake word", "", cfg.wake_word, wake_cb, NULL);
+    s_wake_row = ui_row_toggle(list, ICON_WAVE, UI_C_PURPLE, "Wake word", "", cfg->wake_word, wake_cb, NULL);
 
     ui_section(list, "VOICE AI");
     char ai_conv[32];
@@ -583,7 +568,7 @@ static lv_obj_t *settings_build(void *arg)
     ui_row(list, ICON_PEN, UI_C_ORANGE, "New conversation", NULL, new_ai_conv_cb, NULL);
 
     ui_section(list, "PHONE");
-    s_web_row = ui_row_toggle(list, ICON_MOBILE, UI_C_BLUE, "Settings page", "", cfg.web_enabled, web_cb, NULL);
+    s_web_row = ui_row_toggle(list, ICON_MOBILE, UI_C_BLUE, "Settings page", "", cfg->web_enabled, web_cb, NULL);
     s_web_addr_row = ui_row(list, ICON_LINK, UI_C_TEAL, "Address", web_settings_host(), NULL, NULL);
     s_web_pin_row = ui_row(list, ICON_LOCK, UI_C_ORANGE, "PIN", "", new_pin_cb, NULL);
     s_web_ip_row = ui_row(list, ICON_GLOBE, UI_C_TEAL, "Or IP address", "", NULL, NULL);

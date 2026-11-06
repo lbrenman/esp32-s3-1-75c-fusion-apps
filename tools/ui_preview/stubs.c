@@ -26,6 +26,8 @@ static app_settings_t s = { "Home-WiFi", "example-password", "wss://voice.exampl
                             "5b0c33e1-2f4a-4d8e-b1c9-60a7d2e4f8a1" };
 void settings_init(void) {}
 void settings_get(app_settings_t *o) { *o = s; }
+app_settings_t *settings_copy_new(void) { app_settings_t *p = malloc(sizeof(*p)); *p = s; return p; }
+void settings_copy_free(app_settings_t **p) { if (p && *p) { free(*p); *p = NULL; } }
 esp_err_t settings_set(const app_settings_t *i) { s = *i; printf("settings saved (dark=%d)\n", s.dark_mode); return 0; }
 esp_err_t settings_reset(void) { return 0; }
 esp_err_t settings_new_conversation(char *out, size_t len) {

@@ -45,6 +45,17 @@ void settings_init(void);
 /* Copies the current settings (thread-safe). */
 void settings_get(app_settings_t *out);
 
+/* A copy of the settings in PSRAM, freed automatically when the variable goes out of scope:
+ *     SETTINGS_COPY(cfg);          // like: app_settings_t cfg; settings_get(&cfg);
+ *     cfg->volume = 50;
+ *     settings_set(cfg);
+ * For code in the LVGL task: its stack is only 8 KB, app_settings_t is about 1.5 KB, and screens
+ * nest several of these. (A static copy would sit in internal RAM, which the display needs.) */
+app_settings_t *settings_copy_new(void);
+void settings_copy_free(app_settings_t **p);
+#define SETTINGS_COPY(name) \
+    app_settings_t *name __attribute__((cleanup(settings_copy_free))) = settings_copy_new()
+
 /* Saves every field that differs from the current settings. */
 esp_err_t settings_set(const app_settings_t *in);
 

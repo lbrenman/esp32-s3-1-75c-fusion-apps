@@ -46,6 +46,22 @@
  * after it starts, it turns itself off and Voice chat goes back to hold to talk (see the log). */
 #define WAKE_MIN_FREE_INTERNAL_KB  20
 #define WAKE_MIN_DMA_BLOCK_KB      12
+/* Checked BEFORE the engine starts, so it doesn't take RAM the display is about to need: about
+ * what the engine takes (15 KB measured), and how much bigger than WAKE_MIN_DMA_BLOCK_KB the
+ * largest DMA block has to be. If there isn't that much, the wake word stays off for this visit. */
+#define WAKE_START_COST_KB         15
+#define WAKE_START_DMA_MARGIN_KB   8
+
+/* Waiting beep: while a voice app waits for the server's reply ("Thinking..." / "Translating..."),
+ * a short, quiet tone plays every THINK_BEEP_PERIOD_MS, so you know it's still working. It starts
+ * THINK_BEEP_DELAY_MS after you stop talking and stops as soon as the reply audio arrives.
+ * Voice chat, Voice AI and the Translator. 0 = off. */
+#define THINK_BEEP              1
+#define THINK_BEEP_DELAY_MS     1000      /* quiet for this long first (fast replies get no beep) */
+#define THINK_BEEP_PERIOD_MS    1500      /* one beep this often */
+#define THINK_BEEP_HZ           880       /* pitch */
+#define THINK_BEEP_MS           60        /* length of one beep */
+#define THINK_BEEP_LEVEL        1200      /* loudness, 0-32767 before the volume setting (the wake chime is 5000) */
 
 /* Connection diagnostics in the serial log (tag "vdiag"): every connect/disconnect with timings,
  * decoded error details, close codes, send times, and a health line every VOICE_DIAG_HEARTBEAT_S

@@ -6,6 +6,8 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_random.h"
+#include "esp_heap_caps.h"
+#include <stdlib.h>
 
 #include "settings_store.h"
 #include "app_config.h"
@@ -227,6 +229,26 @@ esp_err_t settings_new_ai_conversation(char *out, size_t out_len)
     ESP_LOGI(TAG, "New Voice AI conversation %s", s.ai_conversation_id);
     if (out && out_len) strlcpy(out, s.ai_conversation_id, out_len);
     return err;
+}
+
+app_settings_t *settings_copy_new(void)
+{
+    app_settings_t *p = heap_caps_malloc(sizeof(*p), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p) p = malloc(sizeof(*p));
+    if (!p) {
+        ESP_LOGE(TAG, "Out of memory for a settings copy");
+        abort();
+    }
+    settings_get(p);
+    return p;
+}
+
+void settings_copy_free(app_settings_t **p)
+{
+    if (p && *p) {
+        free(*p);
+        *p = NULL;
+    }
 }
 
 void settings_get(app_settings_t *out)

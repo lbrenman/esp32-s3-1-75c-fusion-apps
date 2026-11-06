@@ -206,38 +206,38 @@ static void refresh_timer_cb(lv_timer_t *t) { refresh_soon(); }
 static void apply_cb(void *arg)
 {
     web_job_t *j = arg;
-    static app_settings_t cfg, old;      /* LVGL task only; static keeps ~3 KB off its 8 KB stack */
-    settings_get(&old);
-    cfg = old;
+    SETTINGS_COPY(old);                  /* in PSRAM: off the LVGL task's 8 KB stack and out of internal RAM */
+    SETTINGS_COPY(cfg);
+    *cfg = *old;
 
     /* merge onto the settings as they are now (the watch may have changed something meanwhile) */
-    if (j->mask & F_WS_URL)   strlcpy(cfg.ws_url, j->v.ws_url, sizeof(cfg.ws_url));
-    if (j->mask & F_WS_KEY)   strlcpy(cfg.ws_api_key, j->v.ws_api_key, sizeof(cfg.ws_api_key));
-    if (j->mask & F_WAKE)     cfg.wake_word = j->v.wake_word;
-    if (j->mask & F_TR_URL)   strlcpy(cfg.tr_url, j->v.tr_url, sizeof(cfg.tr_url));
-    if (j->mask & F_TR_KEY)   strlcpy(cfg.tr_api_key, j->v.tr_api_key, sizeof(cfg.tr_api_key));
+    if (j->mask & F_WS_URL)   strlcpy(cfg->ws_url, j->v.ws_url, sizeof(cfg->ws_url));
+    if (j->mask & F_WS_KEY)   strlcpy(cfg->ws_api_key, j->v.ws_api_key, sizeof(cfg->ws_api_key));
+    if (j->mask & F_WAKE)     cfg->wake_word = j->v.wake_word;
+    if (j->mask & F_TR_URL)   strlcpy(cfg->tr_url, j->v.tr_url, sizeof(cfg->tr_url));
+    if (j->mask & F_TR_KEY)   strlcpy(cfg->tr_api_key, j->v.tr_api_key, sizeof(cfg->tr_api_key));
     if (j->mask & F_TR_LANG) {
-        strlcpy(cfg.tr_src, j->v.tr_src, sizeof(cfg.tr_src));
-        strlcpy(cfg.tr_dst, j->v.tr_dst, sizeof(cfg.tr_dst));
+        strlcpy(cfg->tr_src, j->v.tr_src, sizeof(cfg->tr_src));
+        strlcpy(cfg->tr_dst, j->v.tr_dst, sizeof(cfg->tr_dst));
     }
-    if (j->mask & F_MCP_URL)  strlcpy(cfg.mcp_url, j->v.mcp_url, sizeof(cfg.mcp_url));
-    if (j->mask & F_MCP_KEY)  strlcpy(cfg.mcp_api_key, j->v.mcp_api_key, sizeof(cfg.mcp_api_key));
-    if (j->mask & F_STK_AUTO) cfg.stocks_auto = j->v.stocks_auto;
-    if (j->mask & F_DARK)     cfg.dark_mode = j->v.dark_mode;
-    if (j->mask & F_BRIGHT)   cfg.brightness = j->v.brightness;
-    if (j->mask & F_VOLUME)   cfg.volume = j->v.volume;
-    if (j->mask & F_AI_URL)   strlcpy(cfg.ai_url, j->v.ai_url, sizeof(cfg.ai_url));
-    if (j->mask & F_AI_KEY)   strlcpy(cfg.ai_api_key, j->v.ai_api_key, sizeof(cfg.ai_api_key));
+    if (j->mask & F_MCP_URL)  strlcpy(cfg->mcp_url, j->v.mcp_url, sizeof(cfg->mcp_url));
+    if (j->mask & F_MCP_KEY)  strlcpy(cfg->mcp_api_key, j->v.mcp_api_key, sizeof(cfg->mcp_api_key));
+    if (j->mask & F_STK_AUTO) cfg->stocks_auto = j->v.stocks_auto;
+    if (j->mask & F_DARK)     cfg->dark_mode = j->v.dark_mode;
+    if (j->mask & F_BRIGHT)   cfg->brightness = j->v.brightness;
+    if (j->mask & F_VOLUME)   cfg->volume = j->v.volume;
+    if (j->mask & F_AI_URL)   strlcpy(cfg->ai_url, j->v.ai_url, sizeof(cfg->ai_url));
+    if (j->mask & F_AI_KEY)   strlcpy(cfg->ai_api_key, j->v.ai_api_key, sizeof(cfg->ai_api_key));
 
-    bool ws_changed   = strcmp(cfg.ws_url, old.ws_url) || strcmp(cfg.ws_api_key, old.ws_api_key);
-    bool tr_changed   = strcmp(cfg.tr_url, old.tr_url) || strcmp(cfg.tr_api_key, old.tr_api_key);
-    bool lang_changed = strcmp(cfg.tr_src, old.tr_src) || strcmp(cfg.tr_dst, old.tr_dst);
-    bool ai_changed   = strcmp(cfg.ai_url, old.ai_url) || strcmp(cfg.ai_api_key, old.ai_api_key);
-    bool mcp_changed  = strcmp(cfg.mcp_url, old.mcp_url) || strcmp(cfg.mcp_api_key, old.mcp_api_key);
-    bool changed = memcmp(&cfg, &old, sizeof(cfg)) != 0;
+    bool ws_changed   = strcmp(cfg->ws_url, old->ws_url) || strcmp(cfg->ws_api_key, old->ws_api_key);
+    bool tr_changed   = strcmp(cfg->tr_url, old->tr_url) || strcmp(cfg->tr_api_key, old->tr_api_key);
+    bool lang_changed = strcmp(cfg->tr_src, old->tr_src) || strcmp(cfg->tr_dst, old->tr_dst);
+    bool ai_changed   = strcmp(cfg->ai_url, old->ai_url) || strcmp(cfg->ai_api_key, old->ai_api_key);
+    bool mcp_changed  = strcmp(cfg->mcp_url, old->mcp_url) || strcmp(cfg->mcp_api_key, old->mcp_api_key);
+    bool changed = memcmp(cfg, old, sizeof(*cfg)) != 0;
 
     esp_err_t err = ESP_OK;
-    if (changed) err = settings_set(&cfg);
+    if (changed) err = settings_set(cfg);
 
     /* apply it the way the watch's own screens do */
     bool voice_open = voice_state() != VOICE_OFF;
@@ -252,18 +252,18 @@ static void apply_cb(void *arg)
     } else if (lang_changed && voice_mode() == VOICE_MODE_TRANSLATE) {
         voice_reconnect_when_idle();         /* waits for a translation still on its way */
     }
-    if (cfg.wake_word != old.wake_word)     voice_set_wake_word(cfg.wake_word);
-    if (cfg.volume != old.volume)           voice_set_volume(cfg.volume);
-    if (cfg.brightness != old.brightness)   bsp_display_brightness_set(cfg.brightness);
+    if (cfg->wake_word != old->wake_word)     voice_set_wake_word(cfg->wake_word);
+    if (cfg->volume != old->volume)           voice_set_volume(cfg->volume);
+    if (cfg->brightness != old->brightness)   bsp_display_brightness_set(cfg->brightness);
     if (mcp_changed)                        stocks_config_changed();
-    if (cfg.stocks_auto != old.stocks_auto) stocks_set_auto(cfg.stocks_auto);
+    if (cfg->stocks_auto != old->stocks_auto) stocks_set_auto(cfg->stocks_auto);
 
     if (j->action == ACT_NEW_CONV)        voice_new_conversation();
     if (j->action == ACT_NEW_AI_CONV)     voice_new_ai_conversation();
     if (j->action == ACT_STOCKS_REFRESH)  stocks_refresh_now();
 
-    bool dark_changed = cfg.dark_mode != old.dark_mode;
-    if (dark_changed) ui_theme_set_dark(cfg.dark_mode);
+    bool dark_changed = cfg->dark_mode != old->dark_mode;
+    if (dark_changed) ui_theme_set_dark(cfg->dark_mode);
     bool new_conv = j->action == ACT_NEW_CONV || j->action == ACT_NEW_AI_CONV;
     if (dark_changed || ((changed || new_conv) && app_settings_showing())) {
         refresh_soon();                      /* show the new values (and colors) on the watch */

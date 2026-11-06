@@ -57,12 +57,13 @@ static void rounder_event_cb(lv_event_t *e)
  * If there isn't one ("spi transmit (queue) color failed"), esp_lvgl_port drops the error and the
  * "transfer done" callback never comes, so LVGL's own wait (while (flushing);) never ends: the
  * screen freezes and the task watchdog fires. This wait gives up after FLUSH_GUARD_MS instead,
- * logs it, and repaints the screen a moment later (the lost band is redrawn). */
+ * logs it, and repaints the screen once no band has been lost for a while (repainting while memory
+ * is still short would only lose more bands). */
 #define FLUSH_GUARD_MS    250
 #define FLUSH_SPIN_US     3000          /* a normal band takes well under 1 ms: spin first, then sleep */
 
 static volatile uint32_t s_flush_lost;
-static uint32_t          s_flush_lost_seen;
+static uint32_t          s_flush_lost_seen, s_flush_lost_repaired;
 
 static void flush_wait_guard(lv_display_t *disp)
 {
@@ -81,11 +82,16 @@ static void flush_wait_guard(lv_display_t *disp)
     }
 }
 
-/* after a lost band: repaint the whole screen once things have calmed down */
+/* after lost bands: repaint the whole screen once a check passes with no new losses */
 static void flush_repair_timer_cb(lv_timer_t *t)
 {
-    if (s_flush_lost == s_flush_lost_seen) return;
-    s_flush_lost_seen = s_flush_lost;
+    uint32_t lost = s_flush_lost;
+    if (lost != s_flush_lost_seen) {          /* still losing bands: wait */
+        s_flush_lost_seen = lost;
+        return;
+    }
+    if (lost == s_flush_lost_repaired) return;
+    s_flush_lost_repaired = lost;
     lv_obj_invalidate(lv_screen_active());
 }
 
@@ -133,7 +139,7 @@ lv_display_t *app_display_start(void)
     lv_display_add_event_cb(disp, rounder_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
     if (lvgl_port_lock(0)) {
         lv_display_set_flush_wait_cb(disp, flush_wait_guard);
-        lv_timer_create(flush_repair_timer_cb, 500, NULL);
+        lv_timer_create(flush_repair_timer_cb, 1000, NULL);
         lvgl_port_unlock();
     }
 

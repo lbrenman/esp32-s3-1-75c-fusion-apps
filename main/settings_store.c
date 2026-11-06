@@ -34,6 +34,10 @@
 #ifndef TRANSLATE_TARGET_LANG
 #define TRANSLATE_TARGET_LANG DEFAULT_TR_TARGET
 #endif
+/* Voice AI app (added later). Without these, it uses the voice server's host and API key. */
+#ifndef AI_CHAT_API_KEY
+#define AI_CHAT_API_KEY WS_API_KEY
+#endif
 #define XSTR(x) STR(x)
 #define STR(x)  #x
 
@@ -44,6 +48,12 @@ static const char s_default_tr_url[] = TRANSLATE_WS_URL;
 static const char s_default_tr_url[] = "wss://" WS_HOST ":" XSTR(WS_PORT) "/translator";
 #endif
 
+#ifdef AI_CHAT_URL
+static const char s_default_ai_url[] = AI_CHAT_URL;
+#else
+static const char s_default_ai_url[] = "https://" WS_HOST ":" XSTR(WS_PORT) "/voice-ai-chat-api";
+#endif
+
 static app_settings_t    s_cur;
 static SemaphoreHandle_t s_mtx;
 
@@ -51,6 +61,7 @@ const char *settings_default_url(void) { return s_default_url; }
 const char *settings_build_host(void)  { return WS_HOST; }
 const char *settings_default_mcp_url(void) { return STOCKS_MCP_URL; }
 const char *settings_default_tr_url(void) { return s_default_tr_url; }
+const char *settings_default_ai_url(void) { return s_default_ai_url; }
 
 static void make_uuid(char *out /* SET_CONV_LEN + 1 bytes */)
 {
@@ -98,6 +109,9 @@ static void load_defaults(app_settings_t *s)
     strlcpy(s->tr_src, TRANSLATE_SOURCE_LANG, sizeof(s->tr_src));
     strlcpy(s->tr_dst, TRANSLATE_TARGET_LANG, sizeof(s->tr_dst));
     s->web_enabled = DEFAULT_WEB_SETTINGS;
+    strlcpy(s->ai_url, s_default_ai_url, sizeof(s->ai_url));
+    strlcpy(s->ai_api_key, AI_CHAT_API_KEY, sizeof(s->ai_api_key));
+    /* ai_conversation_id stays empty: settings_init() makes one */
     /* web_pin stays empty: settings_init() makes one */
 }
 
@@ -151,6 +165,9 @@ void settings_init(void)
         get_str(h, "trdst",  s_cur.tr_dst,     sizeof(s_cur.tr_dst));
         get_u8(h, "web",    &web);
         get_str(h, "webpin", s_cur.web_pin,    sizeof(s_cur.web_pin));
+        get_str(h, "aiurl",  s_cur.ai_url,     sizeof(s_cur.ai_url));
+        get_str(h, "aikey",  s_cur.ai_api_key, sizeof(s_cur.ai_api_key));
+        get_str(h, "aiconv", s_cur.ai_conversation_id, sizeof(s_cur.ai_conversation_id));
         s_cur.dark_mode = dark != 0;
         s_cur.stocks_auto = stk_auto != 0;
         s_cur.wake_word = wake != 0;
@@ -169,6 +186,11 @@ void settings_init(void)
         settings_new_conversation(NULL, 0);
     } else {
         ESP_LOGI(TAG, "Conversation %s", s_cur.conversation_id);
+    }
+    if (strlen(s_cur.ai_conversation_id) != SET_CONV_LEN) {
+        settings_new_ai_conversation(NULL, 0);
+    } else {
+        ESP_LOGI(TAG, "Voice AI conversation %s", s_cur.ai_conversation_id);
     }
     /* the phone settings page's PIN: made once, kept until "New PIN" or a reset (never logged) */
     if (!pin_ok(s_cur.web_pin)) settings_new_web_pin(NULL, 0);
@@ -193,6 +215,17 @@ esp_err_t settings_new_conversation(char *out, size_t out_len)
     esp_err_t err = settings_set(&s);
     ESP_LOGI(TAG, "New conversation %s", s.conversation_id);
     if (out && out_len) strlcpy(out, s.conversation_id, out_len);
+    return err;
+}
+
+esp_err_t settings_new_ai_conversation(char *out, size_t out_len)
+{
+    app_settings_t s;
+    settings_get(&s);
+    make_uuid(s.ai_conversation_id);
+    esp_err_t err = settings_set(&s);
+    ESP_LOGI(TAG, "New Voice AI conversation %s", s.ai_conversation_id);
+    if (out && out_len) strlcpy(out, s.ai_conversation_id, out_len);
     return err;
 }
 
@@ -236,6 +269,9 @@ esp_err_t settings_set(const app_settings_t *in)
     if (strcmp(old.tr_dst, in->tr_dst))         err |= nvs_set_str(h, "trdst", in->tr_dst);
     if (old.web_enabled != in->web_enabled)     err |= nvs_set_u8(h, "web", in->web_enabled ? 1 : 0);
     if (strcmp(old.web_pin, in->web_pin))       err |= nvs_set_str(h, "webpin", in->web_pin);
+    if (strcmp(old.ai_url, in->ai_url))         err |= nvs_set_str(h, "aiurl", in->ai_url);
+    if (strcmp(old.ai_api_key, in->ai_api_key)) err |= nvs_set_str(h, "aikey", in->ai_api_key);
+    if (strcmp(old.ai_conversation_id, in->ai_conversation_id)) err |= nvs_set_str(h, "aiconv", in->ai_conversation_id);
     err |= nvs_commit(h);
     nvs_close(h);
 
@@ -256,6 +292,7 @@ esp_err_t settings_reset(void)
     xSemaphoreGive(s_mtx);
     ESP_LOGI(TAG, "Settings reset to defaults");
     settings_new_conversation(NULL, 0);    /* a reset also starts a new conversation */
+    settings_new_ai_conversation(NULL, 0); /* ...in both voice apps */
     settings_new_web_pin(NULL, 0);         /* ...and makes a new phone settings PIN */
     return ESP_OK;
 }

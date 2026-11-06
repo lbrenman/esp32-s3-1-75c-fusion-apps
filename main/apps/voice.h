@@ -1,7 +1,7 @@
 #pragma once
-/* Voice engine: recording, wake word, WebSocket, reply playback (no LVGL in here).
- * Shared by Voice chat and Translator: one microphone, one speaker, one connection, and only one
- * of the two apps is open at a time. The app sets the mode before it activates the engine.
+/* Voice engine: recording, wake word, WebSocket or HTTPS, reply playback (no LVGL in here).
+ * Shared by Voice chat, Voice AI and Translator: one microphone, one speaker, one connection, and
+ * only one of the apps is open at a time. The app sets the mode before it activates the engine.
  * The screens poll voice_state() / voice_text_*() from an LVGL timer,
  * so this code never touches LVGL objects from its own tasks. */
 
@@ -25,6 +25,8 @@ typedef enum {
 typedef enum {
     VOICE_MODE_CHAT,       /* Voice chat: ws_url + conversationId, TRANSCRIBED_REQUEST / RESPONSE, wake word */
     VOICE_MODE_TRANSLATE,  /* Translator: tr_url/translate + language pair, TRANSLATION events, hold to talk only */
+    VOICE_MODE_AI_CHAT,    /* Voice AI: one HTTPS POST per turn (multipart WAV up, JSON + base64 audio back),
+                            * ai_url/voice-ai-chat + its own conversationId, wake word */
 } voice_mode_t;
 
 esp_err_t     voice_init(void);              /* once at boot: codec, wake word model, tasks */
@@ -34,12 +36,15 @@ void          voice_set_active(bool active); /* app opened / closed: connect / d
 void          voice_reconnect(void);         /* server URL or API key changed (also switches the connection on) */
 void          voice_set_connected(bool on);  /* the Connection switch; on each time the app opens */
 void          voice_new_conversation(void);  /* new saved conversation ID; reconnects if connected */
+void          voice_new_ai_conversation(void);  /* Voice AI: new saved conversation ID (clears the screen if open) */
 /* Translator languages changed (saved by the caller): the pair is part of the connection URL, so
  * reconnect, but only once no turn is in flight (a translation still arriving isn't cut off).
  * Does nothing while the connection is switched off: the next connect uses the new pair. */
 void          voice_reconnect_when_idle(void);
 /* Translator: the endpoint for a base URL (adds /translate, never twice; /speech becomes /translate). */
 void          voice_tr_endpoint(const char *base, char *out, size_t out_len);
+/* Voice AI: the endpoint for a base URL (adds /voice-ai-chat, never twice). */
+void          voice_ai_endpoint(const char *base, char *out, size_t out_len);
 bool          voice_wants_connection(void);
 void          voice_set_volume(int percent);
 

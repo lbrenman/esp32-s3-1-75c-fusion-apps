@@ -5,7 +5,7 @@
  *   POST /api/login     {"pin":"123456"} -> session cookie
  *   POST /api/logout
  *   POST /api/settings  {"ws_url": "...", "volume": 60, ...}: only the fields sent are changed
- *   POST /api/action    {"action": "new_conversation" | "stocks_refresh" | "restart"}
+ *   POST /api/action    {"action": "new_conversation" | "new_ai_conversation" | "stocks_refresh" | "restart"}
  *
  * POSTs need the header "X-Fusion-Apps: 1" (a page on another site can't send it without a CORS
  * preflight, which this server never answers), and the cookie is SameSite=Strict.
@@ -177,9 +177,10 @@ enum {
     F_TR_URL   = 1 << 3,  F_TR_KEY  = 1 << 4,  F_TR_LANG = 1 << 5,
     F_MCP_URL  = 1 << 6,  F_MCP_KEY = 1 << 7,  F_STK_AUTO = 1 << 8,
     F_DARK     = 1 << 9,  F_BRIGHT  = 1 << 10, F_VOLUME  = 1 << 11,
+    F_AI_URL   = 1 << 12, F_AI_KEY  = 1 << 13,
 };
 
-typedef enum { ACT_NONE, ACT_NEW_CONV, ACT_STOCKS_REFRESH } web_action_t;
+typedef enum { ACT_NONE, ACT_NEW_CONV, ACT_NEW_AI_CONV, ACT_STOCKS_REFRESH } web_action_t;
 
 typedef struct {
     uint32_t       mask;     /* F_* fields sent by the page */
@@ -225,10 +226,13 @@ static void apply_cb(void *arg)
     if (j->mask & F_DARK)     cfg.dark_mode = j->v.dark_mode;
     if (j->mask & F_BRIGHT)   cfg.brightness = j->v.brightness;
     if (j->mask & F_VOLUME)   cfg.volume = j->v.volume;
+    if (j->mask & F_AI_URL)   strlcpy(cfg.ai_url, j->v.ai_url, sizeof(cfg.ai_url));
+    if (j->mask & F_AI_KEY)   strlcpy(cfg.ai_api_key, j->v.ai_api_key, sizeof(cfg.ai_api_key));
 
     bool ws_changed   = strcmp(cfg.ws_url, old.ws_url) || strcmp(cfg.ws_api_key, old.ws_api_key);
     bool tr_changed   = strcmp(cfg.tr_url, old.tr_url) || strcmp(cfg.tr_api_key, old.tr_api_key);
     bool lang_changed = strcmp(cfg.tr_src, old.tr_src) || strcmp(cfg.tr_dst, old.tr_dst);
+    bool ai_changed   = strcmp(cfg.ai_url, old.ai_url) || strcmp(cfg.ai_api_key, old.ai_api_key);
     bool mcp_changed  = strcmp(cfg.mcp_url, old.mcp_url) || strcmp(cfg.mcp_api_key, old.mcp_api_key);
     bool changed = memcmp(&cfg, &old, sizeof(cfg)) != 0;
 
@@ -239,6 +243,9 @@ static void apply_cb(void *arg)
     bool voice_open = voice_state() != VOICE_OFF;
     if (ws_changed && voice_open && voice_mode() == VOICE_MODE_CHAT && voice_wants_connection()) {
         voice_reconnect();
+    }
+    if (ai_changed && voice_open && voice_mode() == VOICE_MODE_AI_CHAT && voice_wants_connection()) {
+        voice_reconnect();                   /* checks the new URL */
     }
     if (tr_changed && voice_open && voice_mode() == VOICE_MODE_TRANSLATE && voice_wants_connection()) {
         voice_reconnect();
@@ -252,14 +259,16 @@ static void apply_cb(void *arg)
     if (cfg.stocks_auto != old.stocks_auto) stocks_set_auto(cfg.stocks_auto);
 
     if (j->action == ACT_NEW_CONV)        voice_new_conversation();
+    if (j->action == ACT_NEW_AI_CONV)     voice_new_ai_conversation();
     if (j->action == ACT_STOCKS_REFRESH)  stocks_refresh_now();
 
     bool dark_changed = cfg.dark_mode != old.dark_mode;
     if (dark_changed) ui_theme_set_dark(cfg.dark_mode);
-    if (dark_changed || ((changed || j->action == ACT_NEW_CONV) && app_settings_showing())) {
+    bool new_conv = j->action == ACT_NEW_CONV || j->action == ACT_NEW_AI_CONV;
+    if (dark_changed || ((changed || new_conv) && app_settings_showing())) {
         refresh_soon();                      /* show the new values (and colors) on the watch */
     }
-    if (changed || j->action == ACT_NEW_CONV) ui_toast("Changed from your phone");
+    if (changed || new_conv) ui_toast("Changed from your phone");
 
     heap_caps_free(j);
     s_apply_err = err;
@@ -312,6 +321,9 @@ static esp_err_t state_get(httpd_req_t *req)
     add_key_info(s, "ws_key", cfg.ws_api_key);
     cJSON_AddBoolToObject(s, "wake_word", cfg.wake_word);
     cJSON_AddStringToObject(s, "conversation", cfg.conversation_id);
+    cJSON_AddStringToObject(s, "ai_url", cfg.ai_url);
+    add_key_info(s, "ai_key", cfg.ai_api_key);
+    cJSON_AddStringToObject(s, "ai_conversation", cfg.ai_conversation_id);
     cJSON_AddStringToObject(s, "tr_url", cfg.tr_url);
     add_key_info(s, "tr_key", cfg.tr_api_key);
     cJSON_AddStringToObject(s, "tr_src", cfg.tr_src);
@@ -326,6 +338,7 @@ static esp_err_t state_get(httpd_req_t *req)
     /* the secrets.h URLs, for the "Use secrets.h URL" buttons */
     cJSON *d = cJSON_AddObjectToObject(o, "defaults");
     cJSON_AddStringToObject(d, "ws_url", settings_default_url());
+    cJSON_AddStringToObject(d, "ai_url", settings_default_ai_url());
     cJSON_AddStringToObject(d, "tr_url", settings_default_tr_url());
     cJSON_AddStringToObject(d, "mcp_url", settings_default_mcp_url());
 
@@ -348,7 +361,8 @@ static esp_err_t state_get(httpd_req_t *req)
     cJSON_AddBoolToObject(b, "full", p.full);
     voice_state_t vs = voice_state();
     cJSON_AddStringToObject(st, "voice_app", vs == VOICE_OFF ? "" :
-                            voice_mode() == VOICE_MODE_CHAT ? "Voice chat" : "Translator");
+                            voice_mode() == VOICE_MODE_CHAT ? "Voice chat" :
+                            voice_mode() == VOICE_MODE_AI_CHAT ? "Voice AI" : "Translator");
     cJSON_AddStringToObject(st, "voice_state", voice_state_text(vs));
     static const char *const wake_txt[] = { "off", "on", "no_model", "no_memory" };
     wake_status_t ws = voice_wake_status();
@@ -504,7 +518,7 @@ static esp_err_t settings_post(httpd_req_t *req)
     static const char *const ws_schemes[]   = { "wss://", "ws://", NULL };
     static const char *const http_schemes[] = { "https://", "http://", NULL };
     static const char *const known[] = {
-        "ws_url", "ws_key", "wake_word", "tr_url", "tr_key", "tr_src", "tr_dst", "mcp_url", "mcp_key",
+        "ws_url", "ws_key", "wake_word", "ai_url", "ai_key", "tr_url", "tr_key", "tr_src", "tr_dst", "mcp_url", "mcp_key",
         "stocks_auto", "dark_mode", "brightness", "volume", NULL,
     };
 
@@ -529,6 +543,8 @@ static esp_err_t settings_post(httpd_req_t *req)
     CHECK("ws_url",  take_str(j, "ws_url", v->ws_url, sizeof(v->ws_url), ws_schemes, F_WS_URL, m, &err));
     CHECK("ws_key",  take_str(j, "ws_key", v->ws_api_key, sizeof(v->ws_api_key), NULL, F_WS_KEY, m, &err));
     CHECK("wake_word", take_bool(j, "wake_word", &v->wake_word, F_WAKE, m, &err));
+    CHECK("ai_url",  take_str(j, "ai_url", v->ai_url, sizeof(v->ai_url), http_schemes, F_AI_URL, m, &err));
+    CHECK("ai_key",  take_str(j, "ai_key", v->ai_api_key, sizeof(v->ai_api_key), NULL, F_AI_KEY, m, &err));
     CHECK("tr_url",  take_str(j, "tr_url", v->tr_url, sizeof(v->tr_url), ws_schemes, F_TR_URL, m, &err));
     CHECK("tr_key",  take_str(j, "tr_key", v->tr_api_key, sizeof(v->tr_api_key), NULL, F_TR_KEY, m, &err));
     CHECK("mcp_url", take_str(j, "mcp_url", v->mcp_url, sizeof(v->mcp_url), http_schemes, F_MCP_URL, m, &err));
@@ -569,7 +585,7 @@ static esp_err_t settings_post(httpd_req_t *req)
         heap_caps_free(job);
         return send_ok(req);
     }
-    ESP_LOGI(TAG, "Settings changed from the page (fields 0x%03x)", (unsigned)job->mask);   /* names only, never values */
+    ESP_LOGI(TAG, "Settings changed from the page (fields 0x%04x)", (unsigned)job->mask);   /* names only, never values */
     esp_err_t r = run_job(job);
     if (r == ESP_ERR_TIMEOUT) return send_error(req, "503 Service Unavailable", "The watch is busy - try again");
     if (r != ESP_OK) return send_error(req, "500 Internal Server Error", "Saving failed - see the serial log");
@@ -585,7 +601,7 @@ static esp_err_t action_post(httpd_req_t *req)
     cJSON *j = read_json(req);
     if (!j) return ESP_OK;
     const cJSON *a = cJSON_GetObjectItemCaseSensitive(j, "action");
-    char act[24] = "";
+    char act[32] = "";
     if (cJSON_IsString(a)) strlcpy(act, a->valuestring, sizeof(act));
     cJSON_Delete(j);
 
@@ -601,6 +617,7 @@ static esp_err_t action_post(httpd_req_t *req)
     }
 
     web_action_t action = strcmp(act, "new_conversation") == 0 ? ACT_NEW_CONV :
+                          strcmp(act, "new_ai_conversation") == 0 ? ACT_NEW_AI_CONV :
                           strcmp(act, "stocks_refresh") == 0   ? ACT_STOCKS_REFRESH : ACT_NONE;
     if (action == ACT_NONE) return send_error(req, "400 Bad Request", "Unknown action");
     web_job_t *job = heap_caps_calloc(1, sizeof(*job), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);

@@ -22,7 +22,8 @@ static app_settings_t s = { "Home-WiFi", "example-password", "wss://voice.exampl
                             "example-api-key-abcd", 1, 80, 75, "3f2a9c1e-7b4d-4e21-9a6f-0c8d5e11c11e",
                             "https://fusion.example.com:4443/FusionStockWatchListMCP", "example-mcp-key-wxyz", 1, 1,
                             "wss://fusion.example.com:4443/translator", "example-tr-key-9f3e", "en", "es",
-                            1, "482913" };
+                            1, "482913", "https://fusion.example.com:4443/voice-ai-chat-api", "example-ai-key-71c2",
+                            "5b0c33e1-2f4a-4d8e-b1c9-60a7d2e4f8a1" };
 void settings_init(void) {}
 void settings_get(app_settings_t *o) { *o = s; }
 esp_err_t settings_set(const app_settings_t *i) { s = *i; printf("settings saved (dark=%d)\n", s.dark_mode); return 0; }
@@ -30,6 +31,10 @@ esp_err_t settings_reset(void) { return 0; }
 esp_err_t settings_new_conversation(char *out, size_t len) {
     snprintf(s.conversation_id, sizeof(s.conversation_id), "9d81b7aa-1c2e-4f00-8b3a-7e6f2d90a4b2");
     if (out) snprintf(out, len, "%s", s.conversation_id);
+    return 0; }
+esp_err_t settings_new_ai_conversation(char *out, size_t len) {
+    snprintf(s.ai_conversation_id, sizeof(s.ai_conversation_id), "e4a7d012-6b3f-4c95-a2d8-1f0e9c7b5a36");
+    if (out) snprintf(out, len, "%s", s.ai_conversation_id);
     return 0; }
 esp_err_t settings_new_web_pin(char *out, size_t len) {
     snprintf(s.web_pin, sizeof(s.web_pin), "730158");
@@ -39,6 +44,7 @@ const char *settings_default_url(void) { return "wss://example:4443/ws/speech"; 
 const char *settings_build_host(void) { return "example"; }
 const char *settings_default_mcp_url(void) { return "https://example:4443/FusionStockWatchListMCP"; }
 const char *settings_default_tr_url(void) { return "wss://example:4443/translator"; }
+const char *settings_default_ai_url(void) { return "https://example:4443/voice-ai-chat-api"; }
 
 net_state_t g_net = NET_UP;
 void net_start(void) {}
@@ -65,6 +71,8 @@ void voice_reconnect(void) { printf("voice_reconnect\n"); g_want = true; }
 void voice_set_connected(bool on) { printf("voice_set_connected %d\n", on); g_want = on; g_vs = on ? VOICE_READY : VOICE_DISCONNECTED; }
 bool voice_wants_connection(void) { return g_want; }
 void voice_new_conversation(void) { settings_new_conversation(NULL, 0); printf("voice_new_conversation\n"); }
+void voice_new_ai_conversation(void) { settings_new_ai_conversation(NULL, 0); printf("voice_new_ai_conversation\n"); }
+void voice_ai_endpoint(const char *base, char *out, size_t out_len) { snprintf(out, out_len, "%s/voice-ai-chat", base); }
 void voice_set_volume(int p) {}
 void voice_ptt_press(void) { printf("ptt press\n"); if (!g_want) { voice_set_connected(true); return; } if (g_vs == VOICE_READY) g_vs = VOICE_LISTENING; }
 void voice_ptt_release(void) { printf("ptt release\n"); if (g_vs == VOICE_LISTENING) g_vs = VOICE_THINKING; }
@@ -76,7 +84,7 @@ wake_status_t g_wake_status = WAKE_ON;
 bool g_fg = false;
 void voice_set_wake_word(bool on) { printf("voice_set_wake_word %d\n", on); g_wake_status = on ? WAKE_ON : WAKE_OFF; }
 wake_status_t voice_wake_status(void) { return g_wake_status; }
-bool voice_wake_listening(void) { return g_vmode == VOICE_MODE_CHAT && g_wake_status == WAKE_ON && g_fg && g_want; }
+bool voice_wake_listening(void) { return (g_vmode == VOICE_MODE_CHAT || g_vmode == VOICE_MODE_AI_CHAT) && g_wake_status == WAKE_ON && g_fg && g_want; }
 void voice_set_foreground(bool on) { g_fg = on; }
 /* Translator mode (sim.c sets g_vmode, g_tsrc/g_tdst and g_audio_pending) */
 char g_tsrc[8] = "en", g_tdst[8] = "es";

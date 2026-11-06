@@ -343,22 +343,33 @@ static void volume_cb(lv_event_t *e)
     }
 }
 
+static void conv_text(const char *id, char *buf, size_t len)
+{
+    /* first and last block of the UUID are enough to tell conversations apart */
+    snprintf(buf, len, "%.8s...%s", id, strlen(id) > 12 ? id + strlen(id) - 4 : "");
+}
+
 static void conv_label(char *buf, size_t len)
 {
     app_settings_t cfg;
     settings_get(&cfg);
-    /* first and last block of the UUID are enough to tell conversations apart */
-    snprintf(buf, len, "%.8s...%s", cfg.conversation_id,
-             strlen(cfg.conversation_id) > 12 ? cfg.conversation_id + strlen(cfg.conversation_id) - 4 : "");
+    conv_text(cfg.conversation_id, buf, len);
 }
 
-static ui_row_t s_conv_row;
+static void ai_conv_label(char *buf, size_t len)
+{
+    app_settings_t cfg;
+    settings_get(&cfg);
+    conv_text(cfg.ai_conversation_id, buf, len);
+}
+
+static ui_row_t s_conv_row, s_ai_conv_row;
 static ui_toggle_row_t s_wake_row;
 
 static const char *wake_text(void)
 {
     switch (voice_wake_status()) {
-    case WAKE_ON:        return "Say \"" WAKE_WORD_LABEL "\" in Voice chat";
+    case WAKE_ON:        return "Say \"" WAKE_WORD_LABEL "\" to talk";
     case WAKE_NO_MODEL:  return "No model: run idf.py flash";
     case WAKE_NO_MEMORY: return "Paused: low memory";
     default:             return "Off: hold to talk";
@@ -398,6 +409,21 @@ static void new_conv_cb(lv_event_t *e)
 {
     ui_confirm("New conversation?", "The voice server starts fresh and forgets what you talked about.",
                "Start new", false, do_new_conversation, NULL);
+}
+
+static void do_new_ai_conversation(void *user)
+{
+    voice_new_ai_conversation();
+    char buf[32];
+    ai_conv_label(buf, sizeof(buf));
+    if (s_scr) lv_label_set_text(s_ai_conv_row.value, buf);
+    ui_toast("New conversation started");
+}
+
+static void new_ai_conv_cb(lv_event_t *e)
+{
+    ui_confirm("New conversation?", "The assistant starts fresh and forgets what you talked about.",
+               "Start new", false, do_new_ai_conversation, NULL);
 }
 
 static void do_restart(void *user) { esp_restart(); }
@@ -549,6 +575,12 @@ static lv_obj_t *settings_build(void *arg)
     s_conv_row = ui_row(list, ICON_COMMENT, UI_C_PURPLE, "Conversation", conv, NULL, NULL);
     ui_row(list, ICON_PEN, UI_C_PURPLE, "New conversation", NULL, new_conv_cb, NULL);
     s_wake_row = ui_row_toggle(list, ICON_WAVE, UI_C_PURPLE, "Wake word", "", cfg.wake_word, wake_cb, NULL);
+
+    ui_section(list, "VOICE AI");
+    char ai_conv[32];
+    ai_conv_label(ai_conv, sizeof(ai_conv));
+    s_ai_conv_row = ui_row(list, ICON_ROBOT, UI_C_ORANGE, "Conversation", ai_conv, NULL, NULL);
+    ui_row(list, ICON_PEN, UI_C_ORANGE, "New conversation", NULL, new_ai_conv_cb, NULL);
 
     ui_section(list, "PHONE");
     s_web_row = ui_row_toggle(list, ICON_MOBILE, UI_C_BLUE, "Settings page", "", cfg.web_enabled, web_cb, NULL);

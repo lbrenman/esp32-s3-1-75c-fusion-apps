@@ -206,7 +206,7 @@ static void refresh_timer_cb(lv_timer_t *t) { refresh_soon(); }
 static void apply_cb(void *arg)
 {
     web_job_t *j = arg;
-    app_settings_t cfg, old;
+    static app_settings_t cfg, old;      /* LVGL task only; static keeps ~3 KB off its 8 KB stack */
     settings_get(&old);
     cfg = old;
 

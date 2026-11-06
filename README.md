@@ -342,10 +342,18 @@ RPC error or a tool error) is not retried.
 | Amber | Waiting for Wi-Fi... / Connecting... | Connecting to Wi-Fi or the server |
 | **Green** | **Say "Jarvis"** / **Hold to talk** | Ready (wake word on / off) |
 | Red | Listening... | Recording (the mic orb pulses); after the wake word it stops when you do |
-| Blue | Thinking... | Waiting for the reply (three bouncing dots) |
+| Blue | Thinking... | Waiting for the reply (three bouncing dots, and a quiet beep every 1.5 s after the first second) |
 | Purple | Speaking... | Playing the reply |
 | Red | Not connected | No usable server URL; the note under the mic says what to fix |
 | Gray | Disconnected | Switched off, or idle timeout; tap to connect |
+
+### The waiting beep
+
+While any of the three voice apps waits for the server (*Thinking...* or *Translating...*), a short,
+quiet beep plays every 1.5 s, so you can tell it's still working without looking. It starts 1 s after
+you stop talking (quick replies get none) and stops as soon as the reply audio arrives. In the
+Translator it also covers *Loading audio...*. It goes through the volume setting like everything
+else. To change or turn it off: `THINK_BEEP*` in `app_config.h` (`THINK_BEEP 0` = off).
 
 ### Voice AI
 
@@ -772,6 +780,7 @@ make                      # first run clones cJSON; prints "N checks, 0 failed"
 | `apps/voice_core.c` | `REC_MAX_SECONDS`, `TURN_TIMEOUT_US`, `RX_MAX_BYTES` | 10 s, 45 s, 3 MB |
 | `app_config.h` | `AI_CHAT_PATH`, `AI_CHAT_FORMAT`, `AI_CHAT_LANGUAGE`, `AI_CHAT_VOICE` | `/voice-ai-chat`, `mp3`, server detects, server default |
 | `app_config.h` | `AI_CHAT_TIMEOUT_MS` | 60 s for one Voice AI turn |
+| `app_config.h` | `THINK_BEEP`, `THINK_BEEP_DELAY_MS`, `THINK_BEEP_PERIOD_MS`, `THINK_BEEP_HZ`, `THINK_BEEP_MS`, `THINK_BEEP_LEVEL` | on, 1 s, 1.5 s, 880 Hz, 60 ms, 1200 (the wake chime is 5000) |
 | `apps/app_home.c` | `HOME_TILE_W`, `HOME_ORB`, `HOME_SIDE_ORB`, `HOME_SIDE_OPA` (carousel tile width, orb size in the middle and beside it, how dim the neighbors are) | 120 px, 104 px, 80 px, 140/255 |
 | `apps/app_translate.c` | `REPLAY_W`, `REPLAY_H`, `REPLAY_EXT_PX` (Replay button size and extra touch margin) | 196 x 66 px, 14 px |
 | `app_config.h` | `DEFAULT_TR_SOURCE`, `DEFAULT_TR_TARGET` | `en`, `es` (first boot) |
@@ -958,4 +967,5 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app
 | 2.06: build stops with `Unknown BOARD` | Typo in `-D BOARD=` | Use `2_06` or `1_75c` |
 | 2.06: built the 1.75C by mistake (`display: Display started (ESP32-S3-Touch-AMOLED-1.75C ...` on a 2.06) | The board is remembered per build folder; `build/` is the 1.75C | Build with `-B build_2_06` (and `-D BOARD=2_06` the first time) |
 | 2.06: screen stays black, touch or audio dead | Board package difference not caught in the preview | Send the boot log (`display`, `voice`, `power` lines); the board layer is `main/display_start.c` and `boards/2_06/` |
+| Opening Settings restarts the board (`Stack canary watchpoint triggered (LVGL)` or `stack overflow in task LVGL`) | The LVGL task's 8 KB stack (2.06) ran out while building the screen | Fixed by keeping the screens' settings copies off the stack (`static app_settings_t cfg` in `app_settings.c`, `app_voice.c`, `web_settings.c`). If it comes back, raise `port_cfg.task_stack` in `main/display_start.c` |
 | No battery level on Home | The AXP2101 didn't answer on I2C (`power:` lines in the log) | Check the log line; the rest of the app works without it |

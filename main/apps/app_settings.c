@@ -66,7 +66,7 @@ static void status_text(char *buf, size_t len)
 static void refresh_rows(void)
 {
     if (!s_scr) return;
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     lv_label_set_text(s_net_row.value, cfg.wifi_ssid[0] ? ssid_text(cfg.wifi_ssid) : "Not set");
     char buf[64];
@@ -129,7 +129,7 @@ static void delete_cb(lv_event_t *e)
 
 static void apply_wifi(const char *ssid, const char *pass)
 {
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     strlcpy(cfg.wifi_ssid, ssid, sizeof(cfg.wifi_ssid));
     strlcpy(cfg.wifi_pass, pass, sizeof(cfg.wifi_pass));
@@ -152,7 +152,7 @@ static bool password_saved(const char *text, void *user)
 static void open_password_editor(const char *ssid, bool replace, int pop_after)
 {
     strlcpy(s_pending_ssid, ssid, sizeof(s_pending_ssid));
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     char title[64];
     snprintf(title, sizeof(title), "%s", ssid_text(ssid));
@@ -213,7 +213,7 @@ static void scan_again_cb(lv_event_t *e);
 static void scan_fill(const net_ap_t *aps, int n)
 {
     lv_obj_clean(s_scan_list);
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     ui_section(s_scan_list, n ? "NETWORKS" : "NO NETWORKS FOUND");
     for (int i = 0; i < n; i++) {
@@ -294,7 +294,7 @@ static void net_row_cb(lv_event_t *e)
 static void pass_row_cb(lv_event_t *e)
 {
     if (ui_nav_busy()) return;
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     if (!cfg.wifi_ssid[0]) {
         ui_toast("Choose a network first");
@@ -306,7 +306,7 @@ static void pass_row_cb(lv_event_t *e)
 static void dark_cb(lv_event_t *e)
 {
     lv_obj_t *sw = lv_event_get_target_obj(e);
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     cfg.dark_mode = lv_obj_has_state(sw, LV_STATE_CHECKED);
     settings_set(&cfg);
@@ -322,7 +322,7 @@ static void bright_cb(lv_event_t *e)
     if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
         bsp_display_brightness_set(v);
     } else {                                   /* released: save */
-        app_settings_t cfg;
+        static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
         settings_get(&cfg);
         cfg.brightness = (uint8_t)v;
         settings_set(&cfg);
@@ -336,7 +336,7 @@ static void volume_cb(lv_event_t *e)
     if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
         voice_set_volume(v);
     } else {
-        app_settings_t cfg;
+        static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
         settings_get(&cfg);
         cfg.volume = (uint8_t)v;
         settings_set(&cfg);
@@ -351,14 +351,14 @@ static void conv_text(const char *id, char *buf, size_t len)
 
 static void conv_label(char *buf, size_t len)
 {
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     conv_text(cfg.conversation_id, buf, len);
 }
 
 static void ai_conv_label(char *buf, size_t len)
 {
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     conv_text(cfg.ai_conversation_id, buf, len);
 }
@@ -388,7 +388,7 @@ static void refresh_wake_row(void)
 static void wake_cb(lv_event_t *e)
 {
     bool on = lv_obj_has_state(lv_event_get_target_obj(e), LV_STATE_CHECKED);
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     cfg.wake_word = on;
     settings_set(&cfg);
@@ -436,7 +436,7 @@ static void restart_cb(lv_event_t *e)
 static void do_reset(void *user)
 {
     settings_reset();
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     bsp_display_brightness_set(cfg.brightness);
     voice_set_volume(cfg.volume);
@@ -468,7 +468,7 @@ static ui_row_t        s_web_pin_row;
 
 static void pin_text(char *buf, size_t len)
 {
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     snprintf(buf, len, "%.3s %.3s", cfg.web_pin, strlen(cfg.web_pin) > 3 ? cfg.web_pin + 3 : "");
 }
@@ -476,7 +476,7 @@ static void pin_text(char *buf, size_t len)
 static void refresh_web_rows(void)
 {
     if (!s_scr || !s_web_row.value) return;
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     bool on = cfg.web_enabled;
     char buf[48];
@@ -547,7 +547,7 @@ void app_settings_refresh(void)
 
 static lv_obj_t *settings_build(void *arg)
 {
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
 
     lv_obj_t *scr;

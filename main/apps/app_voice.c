@@ -405,7 +405,7 @@ static lv_timer_t *s_vs_timer;
 
 static void vs_refresh(void)
 {
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     lv_label_set_text(s_vs_url.value, fl_url(&cfg)[0] ? fl_url(&cfg) : "Not set");
     char masked[48];
@@ -448,7 +448,7 @@ static bool url_saved(const char *text, void *user)
         ui_toast(s_fl->rest ? "Start the URL with https://" : "Start the URL with wss://");
         return true;                       /* stay in the editor */
     }
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     strlcpy(fl_url(&cfg), text, SET_URL_MAX + 1);
     settings_set(&cfg);
@@ -459,7 +459,7 @@ static bool url_saved(const char *text, void *user)
 
 static bool key_saved(const char *text, void *user)
 {
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     strlcpy(fl_key(&cfg), text, SET_KEY_MAX + 1);
     settings_set(&cfg);
@@ -471,7 +471,7 @@ static bool key_saved(const char *text, void *user)
 static void url_cb(lv_event_t *e)
 {
     if (ui_nav_busy()) return;
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     ui_editor_cfg_t ed = {
         .title = "Server URL", .icon = ICON_LINK, .initial = fl_url(&cfg),
@@ -483,7 +483,7 @@ static void url_cb(lv_event_t *e)
 static void key_cb(lv_event_t *e)
 {
     if (ui_nav_busy()) return;
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     ui_editor_cfg_t ed = {
         .title = "API key", .icon = ICON_KEY, .initial = fl_key(&cfg),
@@ -501,7 +501,7 @@ static void conn_cb(lv_event_t *e)
 static void reset_server_cb(lv_event_t *e)
 {
     if (ui_nav_busy()) return;
-    app_settings_t cfg;
+    static app_settings_t cfg;   /* LVGL task only; static keeps ~1.5 KB off its 8 KB stack */
     settings_get(&cfg);
     strlcpy(fl_url(&cfg), fl_default_url(), SET_URL_MAX + 1);
     settings_set(&cfg);

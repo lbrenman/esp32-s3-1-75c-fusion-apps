@@ -1720,6 +1720,8 @@ static int      s_feed_chunk = 0;       /* samples per channel per feed */
 static int      s_fetch_chunk = 0;      /* samples per fetch result */
 static int16_t *s_chime = NULL;         /* stereo 16 kHz */
 static size_t   s_chime_bytes = 0;
+static int16_t *s_think_beep = NULL;    /* stereo 16 kHz: the waiting beep (THINK_BEEP) */
+static size_t   s_think_beep_bytes = 0;
 
 wake_status_t voice_wake_status(void)
 {
@@ -1776,6 +1778,25 @@ static void make_chime(void)
             s_chime[2 * (off + i)] = v;
             s_chime[2 * (off + i) + 1] = v;
         }
+    }
+#endif
+}
+
+/* The waiting beep: one soft sine tone with gentle edges (no clicks), quiet next to the replies */
+static void make_think_beep(void)
+{
+#if THINK_BEEP
+    const int frames = REC_RATE * THINK_BEEP_MS / 1000, ramp = REC_RATE * 15 / 1000;
+    s_think_beep_bytes = (size_t)frames * 2 * sizeof(int16_t);
+    s_think_beep = heap_caps_calloc(1, s_think_beep_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_think_beep) return;
+    for (int i = 0; i < frames; i++) {
+        float env = 1.0f;
+        if (i < ramp) env = (float)i / ramp;
+        else if (i > frames - ramp) env = (float)(frames - i) / ramp;
+        int16_t v = (int16_t)((float)THINK_BEEP_LEVEL * env * sinf(2.0f * (float)M_PI * THINK_BEEP_HZ * i / REC_RATE));
+        s_think_beep[2 * i] = v;
+        s_think_beep[2 * i + 1] = v;
     }
 #endif
 }
@@ -2229,10 +2250,24 @@ static void play_task(void *arg)
     resampler_reset();
     uint32_t fmt_rate = REC_RATE;            // format of the current raw/WAV reply stream
     uint16_t fmt_ch = 1, fmt_bits = 16;
+    int64_t  last_beep_us = 0;
 
     for (;;) {
         play_item_t item;
-        xQueueReceive(s_play_q, &item, portMAX_DELAY);
+        if (xQueueReceive(s_play_q, &item, pdMS_TO_TICKS(100)) != pdTRUE) {
+#if THINK_BEEP
+            /* waiting for the reply: a quiet beep now and then (this task owns the speaker) */
+            int64_t now = esp_timer_get_time();
+            if (s_think_beep && s_state == VOICE_THINKING && LIVE() && !s_mp3_active &&
+                now - s_turn_start_us >= (int64_t)THINK_BEEP_DELAY_MS * 1000 &&
+                now - last_beep_us >= (int64_t)THINK_BEEP_PERIOD_MS * 1000) {
+                size_t w = 0;
+                bsp_extra_i2s_write(s_think_beep, s_think_beep_bytes, &w, 200);
+                last_beep_us = now;
+            }
+#endif
+            continue;
+        }
 
         if (!PLAY_OK()) {                    /* app closed or disconnected: drop the rest of the reply */
             s_replaying = false;
@@ -2390,6 +2425,7 @@ esp_err_t voice_init(void)
                  WAKE_WORD_MODEL, MODEL_PARTITION);
     }
     make_chime();
+    make_think_beep();
 
     /* Task stacks go in PSRAM where they can: internal RAM is what the display (and the wake word)
      * run short of. These tasks never write to flash, which is what a PSRAM stack can't do. */

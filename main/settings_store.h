@@ -34,6 +34,9 @@ typedef struct {
     char    tr_dst[SET_LANG_MAX + 1];     /* Translator: language to translate into, e.g. "es" */
     bool    web_enabled;                  /* phone settings page (web_settings.c) is running */
     char    web_pin[SET_PIN_LEN + 1];     /* its PIN, shown in Settings on the watch; made on first boot */
+    char    ai_url[SET_URL_MAX + 1];      /* Voice AI: base URL, https://host:port/voice-ai-chat-api (the app adds /voice-ai-chat) */
+    char    ai_api_key[SET_KEY_MAX + 1];
+    char    ai_conversation_id[SET_CONV_LEN + 1];  /* Voice AI's own conversation; kept until "New conversation" */
 } app_settings_t;
 
 /* Initializes NVS and loads the settings. Call once, first thing in app_main. */
@@ -51,6 +54,9 @@ esp_err_t settings_reset(void);
 /* Makes and saves a new conversation ID (copied to out if not NULL). */
 esp_err_t settings_new_conversation(char *out, size_t out_len);
 
+/* Voice AI: makes and saves a new conversation ID (copied to out if not NULL). */
+esp_err_t settings_new_ai_conversation(char *out, size_t out_len);
+
 /* Makes and saves a new PIN for the phone settings page (copied to out if not NULL). */
 esp_err_t settings_new_web_pin(char *out, size_t out_len);
 
@@ -62,6 +68,9 @@ const char *settings_default_mcp_url(void);
 
 /* The Translator server base URL from secrets.h (TRANSLATE_WS_URL, or wss://WS_HOST:WS_PORT/translator). */
 const char *settings_default_tr_url(void);
+
+/* The Voice AI server base URL from secrets.h (AI_CHAT_URL, or https://WS_HOST:WS_PORT/voice-ai-chat-api). */
+const char *settings_default_ai_url(void);
 
 /* The WS_HOST from secrets.h (the host main/server_ca.pem was fetched from). */
 const char *settings_build_host(void);

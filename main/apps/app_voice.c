@@ -1,4 +1,7 @@
-/* Voice chat app: the push-to-talk screen and its server settings screen.
+/* Voice chat and Voice AI apps: the push-to-talk screen and its server settings screen.
+ * Both apps use this file; they differ only in the server they talk to (see voice_flavor_t):
+ *   Voice chat  WebSocket voice server (ws_url), conversationId in the connection URL
+ *   Voice AI    Voice AI Chat API over HTTPS (ai_url), one multipart POST per turn
  *
  *   "Jarvis" ...       -> talk hands-free, if the wake word is on (Settings > Voice chat)
  *   quick tap          -> talk hands-free, if the wake word is on
@@ -21,6 +24,23 @@
 #include "voice.h"
 #include "settings_store.h"
 #include "app_config.h"
+
+/* ---- which app is showing (only one voice app is open at a time) ---------------------- */
+typedef struct {
+    voice_mode_t mode;
+    bool         rest;               /* Voice AI: https:// URL, no persistent connection */
+    const char  *server_title;       /* the swipe-up screen */
+    uint32_t     c1, c2;             /* orb colors when ready */
+} voice_flavor_t;
+
+static const voice_flavor_t FL_CHAT = { VOICE_MODE_CHAT, false, "Voice server", UI_C_VOICE_1, UI_C_VOICE_2 };
+static const voice_flavor_t FL_AI   = { VOICE_MODE_AI_CHAT, true, "Voice AI server", UI_C_VOICE_AI_1, UI_C_VOICE_AI_2 };
+static const voice_flavor_t *s_fl = &FL_CHAT;
+
+/* the settings fields of the app that's showing */
+static char       *fl_url(app_settings_t *c) { return s_fl->rest ? c->ai_url : c->ws_url; }
+static char       *fl_key(app_settings_t *c) { return s_fl->rest ? c->ai_api_key : c->ws_api_key; }
+static const char *fl_default_url(void)      { return s_fl->rest ? settings_default_ai_url() : settings_default_url(); }
 
 #define REPLY_BIG_FONT_CHARS 90             // longer replies switch to the 16 px font
 #define ORB_SIZE             UI_SZ(132, 156)
@@ -153,7 +173,7 @@ static uint32_t state_color(voice_state_t st)
 
 static void orb_colors(voice_state_t st)
 {
-    uint32_t c1 = UI_C_VOICE_1, c2 = UI_C_VOICE_2;
+    uint32_t c1 = s_fl->c1, c2 = s_fl->c2;
     if (st == VOICE_LISTENING) { c1 = 0xFF5A4F; c2 = 0xE0306A; }
     else if (st != VOICE_READY) { c1 = 0x6B7079; c2 = 0x3E434C; }
     lv_obj_set_style_bg_color(s_ui.orb, lv_color_hex(c1), 0);
@@ -309,7 +329,7 @@ static lv_obj_t *voice_build(void *arg)
     lv_obj_remove_flag(s_ui.halo, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(s_ui.halo, LV_OBJ_FLAG_HIDDEN);
 
-    s_ui.orb = ui_orb(scr, ORB_SIZE, UI_C_VOICE_1, UI_C_VOICE_2, ICON_MIC, &ui_icons_56);
+    s_ui.orb = ui_orb(scr, ORB_SIZE, s_fl->c1, s_fl->c2, ICON_MIC, &ui_icons_56);
     lv_obj_align(s_ui.orb, LV_ALIGN_CENTER, 0, 0);
     lv_obj_remove_flag(s_ui.orb, LV_OBJ_FLAG_CLICKABLE);
 
@@ -387,9 +407,9 @@ static void vs_refresh(void)
 {
     app_settings_t cfg;
     settings_get(&cfg);
-    lv_label_set_text(s_vs_url.value, cfg.ws_url[0] ? cfg.ws_url : "Not set");
+    lv_label_set_text(s_vs_url.value, fl_url(&cfg)[0] ? fl_url(&cfg) : "Not set");
     char masked[48];
-    ui_mask_secret(cfg.ws_api_key, masked, sizeof(masked), true);
+    ui_mask_secret(fl_key(&cfg), masked, sizeof(masked), true);
     lv_label_set_text(s_vs_key.value, masked);
 
     voice_state_t st = voice_state();
@@ -399,7 +419,7 @@ static void vs_refresh(void)
     const char *txt;
     uint32_t c;
     if (!want)                  { txt = note[0] ? note : "Off"; c = UI_C_GRAY; }
-    else if (voice_connected()) { txt = "Connected"; c = UI_C_GREEN; }
+    else if (voice_connected()) { txt = s_fl->rest ? "Ready" : "Connected"; c = UI_C_GREEN; }
     else if (st == VOICE_ERROR) { txt = note[0] ? note : voice_state_text(st); c = UI_C_RED; }
     else                        { txt = note[0] ? note : voice_state_text(st); c = UI_C_ORANGE; }
     lv_label_set_text(s_vs_conn.value, txt);
@@ -423,16 +443,17 @@ static void vs_delete_cb(lv_event_t *e)
 
 static bool url_saved(const char *text, void *user)
 {
-    if (strncmp(text, "wss://", 6) != 0 && strncmp(text, "ws://", 5) != 0) {
-        ui_toast("Start the URL with wss://");
+    if (s_fl->rest ? (strncmp(text, "https://", 8) != 0 && strncmp(text, "http://", 7) != 0)
+                   : (strncmp(text, "wss://", 6) != 0 && strncmp(text, "ws://", 5) != 0)) {
+        ui_toast(s_fl->rest ? "Start the URL with https://" : "Start the URL with wss://");
         return true;                       /* stay in the editor */
     }
     app_settings_t cfg;
     settings_get(&cfg);
-    strlcpy(cfg.ws_url, text, sizeof(cfg.ws_url));
+    strlcpy(fl_url(&cfg), text, SET_URL_MAX + 1);
     settings_set(&cfg);
     voice_reconnect();
-    ui_toast("Saved - reconnecting");
+    ui_toast(s_fl->rest ? "Saved" : "Saved - reconnecting");
     return false;
 }
 
@@ -440,10 +461,10 @@ static bool key_saved(const char *text, void *user)
 {
     app_settings_t cfg;
     settings_get(&cfg);
-    strlcpy(cfg.ws_api_key, text, sizeof(cfg.ws_api_key));
+    strlcpy(fl_key(&cfg), text, SET_KEY_MAX + 1);
     settings_set(&cfg);
     voice_reconnect();
-    ui_toast("Saved - reconnecting");
+    ui_toast(s_fl->rest ? "Saved" : "Saved - reconnecting");
     return false;
 }
 
@@ -453,8 +474,8 @@ static void url_cb(lv_event_t *e)
     app_settings_t cfg;
     settings_get(&cfg);
     ui_editor_cfg_t ed = {
-        .title = "Server URL", .icon = ICON_LINK, .initial = cfg.ws_url,
-        .placeholder = "wss://host:port/path", .max_len = SET_URL_MAX, .on_save = url_saved,
+        .title = "Server URL", .icon = ICON_LINK, .initial = fl_url(&cfg),
+        .placeholder = s_fl->rest ? "https://host:port/voice-ai-chat-api" : "wss://host:port/path", .max_len = SET_URL_MAX, .on_save = url_saved,
     };
     ui_editor_open(&ed, false);
 }
@@ -465,7 +486,7 @@ static void key_cb(lv_event_t *e)
     app_settings_t cfg;
     settings_get(&cfg);
     ui_editor_cfg_t ed = {
-        .title = "API key", .icon = ICON_KEY, .initial = cfg.ws_api_key,
+        .title = "API key", .icon = ICON_KEY, .initial = fl_key(&cfg),
         .placeholder = "x-api-key", .max_len = SET_KEY_MAX, .password = true, .on_save = key_saved,
     };
     ui_editor_open(&ed, false);
@@ -482,7 +503,7 @@ static void reset_server_cb(lv_event_t *e)
     if (ui_nav_busy()) return;
     app_settings_t cfg;
     settings_get(&cfg);
-    strlcpy(cfg.ws_url, settings_default_url(), sizeof(cfg.ws_url));
+    strlcpy(fl_url(&cfg), fl_default_url(), SET_URL_MAX + 1);
     settings_set(&cfg);
     voice_reconnect();
     vs_refresh();
@@ -491,14 +512,16 @@ static void reset_server_cb(lv_event_t *e)
 
 static void do_new_conversation(void *user)
 {
-    voice_new_conversation();
+    if (s_fl->rest) voice_new_ai_conversation();
+    else voice_new_conversation();
     ui_toast("New conversation started");
 }
 
 static void new_conv_cb(lv_event_t *e)
 {
     if (ui_nav_busy()) return;
-    ui_confirm("New conversation?", "The voice server starts fresh and forgets what you talked about.",
+    ui_confirm("New conversation?", s_fl->rest ? "The assistant starts fresh and forgets what you talked about."
+                                               : "The voice server starts fresh and forgets what you talked about.",
                "Start new", false, do_new_conversation, NULL);
 }
 
@@ -526,7 +549,7 @@ static void vs_gesture_cb(lv_event_t *e)
 static lv_obj_t *voice_settings_build(void *arg)
 {
     lv_obj_t *scr;
-    lv_obj_t *list = ui_list_screen(&scr, "Voice server", false);
+    lv_obj_t *list = ui_list_screen(&scr, s_fl->server_title, false);
     s_vs_scr = scr;
     lv_obj_set_user_data(scr, UI_CUSTOM_GESTURES);
     lv_obj_remove_flag(list, LV_OBJ_FLAG_SCROLLABLE);   /* vertical swipes are navigation here */
@@ -564,10 +587,16 @@ static lv_obj_t *voice_settings_build(void *arg)
 }
 
 /* ===================================================== app descriptor */
-static lv_obj_t *voice_app_build(void *arg) { return voice_build(arg); }
+static lv_obj_t *voice_app_build(void *arg) { s_fl = &FL_CHAT; return voice_build(arg); }
+static lv_obj_t *voice_ai_app_build(void *arg) { s_fl = &FL_AI; return voice_build(arg); }
 static void voice_enter(void)
 {
-    voice_set_mode(VOICE_MODE_CHAT);         /* the engine is shared with the Translator */
+    voice_set_mode(VOICE_MODE_CHAT);         /* the engine is shared with Voice AI and the Translator */
+    voice_set_active(true);
+}
+static void voice_ai_enter(void)
+{
+    voice_set_mode(VOICE_MODE_AI_CHAT);
     voice_set_active(true);
 }
 static void voice_leave(void) { voice_set_active(false); }
@@ -579,5 +608,15 @@ const ui_app_t APP_VOICE = {
     .color2 = UI_C_VOICE_2,
     .build = voice_app_build,
     .on_enter = voice_enter,
+    .on_leave = voice_leave,
+};
+
+const ui_app_t APP_VOICE_AI = {
+    .name = "Voice AI",
+    .icon = ICON_ROBOT,
+    .color1 = UI_C_VOICE_AI_1,
+    .color2 = UI_C_VOICE_AI_2,
+    .build = voice_ai_app_build,
+    .on_enter = voice_ai_enter,
     .on_leave = voice_leave,
 };

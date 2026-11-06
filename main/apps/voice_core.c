@@ -22,6 +22,15 @@
  * Text keeps its accents (UTF-8 for the ui_font_latin_* fonts). See the protocol README of the
  * translator server for the full contract.
  *
+ * Voice AI mode (VOICE_MODE_AI_CHAT, set by the Voice AI app) talks to the Voice AI Chat API over
+ * plain HTTPS instead of a WebSocket. Recording, the wake word and playback are the same as Voice chat:
+ *   send      POST <ai_url>/voice-ai-chat?format=mp3&conversationId=<id>, header x-api-key,
+ *             body multipart/form-data with one "file" part (the same 16 kHz mono WAV)
+ *   receive   200 {"transcript":...,"reply":...,"audioBase64":...,"mimeType":"audio/mpeg"}, or an error
+ *             {"error":{"code":"no_speech","message":...,"stage":...}} with a 4xx/5xx status
+ * There is no connection to keep open: "connected" means the URL is usable and Wi-Fi is up, and
+ * each turn opens its own HTTPS connection (in rec_task, which waits for the whole reply).
+ *
  * Audio uses Waveshare's bsp_extra helper on top of the board's BSP (the same calls as the working
  * 05_Spec_Analyzer example).
  */
@@ -49,6 +58,8 @@
 #include "esp_heap_caps.h"
 #include "esp_crt_bundle.h"
 #include "esp_websocket_client.h"
+#include "esp_http_client.h"
+#include "mbedtls/base64.h"
 #include "cJSON.h"
 
 #include "bsp_board_extra.h"
@@ -98,6 +109,10 @@ extern const char server_ca_pem_start[] asm("_binary_server_ca_pem_start");
 #define NOTE_MAX_CHARS      96
 #define RESEND_WAIT_MS      20000           // after a failed send: wait this long for the reconnect, then resend once
 #define MAX_SAMPLES         ((size_t)REC_MAX_SECONDS * REC_RATE)
+#define AI_RX_MAX_BYTES     (4 * 1024 * 1024)   // Voice AI: largest JSON reply (base64 audio is 4/3 the size)
+#define AI_MODE()           (s_mode == VOICE_MODE_AI_CHAT)
+#define WAKE_MODE()         (s_mode == VOICE_MODE_CHAT || s_mode == VOICE_MODE_AI_CHAT)
+#define LINK_SETTLE_US      (500LL * 1000)      // wake word: wait this long after the link is up (screen slide-in)
 
 /* wake word engine (see "wake word" below) */
 #define WAKE_PREROLL_MS     400             // audio kept from just before you start talking
@@ -137,6 +152,11 @@ static bool             s_audio_ok = false;         // codec + tasks started
 static volatile int64_t s_last_activity_us = 0;
 static volatile int64_t s_turn_start_us = 0;
 static volatile int64_t s_last_rx_us = 0;
+static volatile int64_t s_link_up_us = 0;           // when the connection (or Voice AI's "ready") came up
+static volatile uint32_t s_gen = 0;                 // changes each time an app opens or closes the engine
+/* Voice AI (REST): no socket; "open" = URL checked and ready for turns. s_ws_connected follows it. */
+static volatile bool    s_rest_open = false;
+static volatile bool    s_rest_busy = false;        // a POST is on its way (rec_task)
 
 /* wake word */
 static srmodel_list_t  *s_models = NULL;            /* models in the "model" partition */
@@ -781,6 +801,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t id, void 
         s_dg.connected_us = esp_timer_get_time();
         s_dg.last_pong_us = 0;
         s_dg.last_beat_us = s_dg.connected_us;
+        s_link_up_us = s_dg.connected_us;
 #if VOICE_DIAG
         ESP_LOGI(DTAG, "CONNECTED #%d (attempt #%d) in %lld ms", s_dg.connects, s_dg.attempts,
                  (long long)((s_dg.connected_us - s_dg.attempt_us) / 1000));
@@ -848,11 +869,61 @@ void voice_tr_endpoint(const char *base, char *out, size_t out_len)
     snprintf(out, out_len, "%s%s%s", path, has ? "" : TR_PATH, query);
 }
 
+/* Voice AI: the endpoint for a base URL:
+ *   https://host:4443/voice-ai-chat-api                 -> https://host:4443/voice-ai-chat-api/voice-ai-chat
+ *   https://host:4443/voice-ai-chat-api/                -> the same
+ *   https://host:4443/voice-ai-chat-api/voice-ai-chat   -> unchanged (never doubled)
+ * A query string on the base URL is kept. */
+void voice_ai_endpoint(const char *base, char *out, size_t out_len)
+{
+    char path[SET_URL_MAX + 1], query[SET_URL_MAX + 1] = "";
+    strlcpy(path, base, sizeof(path));
+    char *q = strchr(path, '?');
+    if (q) { strlcpy(query, q, sizeof(query)); *q = '\0'; }
+    size_t n = strlen(path);
+    while (n > 0 && path[n - 1] == '/') path[--n] = '\0';
+    size_t pl = strlen(AI_CHAT_PATH);
+    bool has = n >= pl && strcmp(path + n - pl, AI_CHAT_PATH) == 0;
+    snprintf(out, out_len, "%s%s%s", path, has ? "" : AI_CHAT_PATH, query);
+}
+
+/* Voice AI: nothing to connect to. Check the URL, remember the endpoint, and be ready. */
+static void rest_open(void)
+{
+    app_settings_t cfg;
+    settings_get(&cfg);
+    if (strncmp(cfg.ai_url, "https://", 8) != 0 && strncmp(cfg.ai_url, "http://", 7) != 0) {
+        ESP_LOGE(TAG, "Server URL must start with https:// (Voice AI > swipe up > Server URL)");
+        set_note("Set the server URL: swipe up");
+        s_cfg_error = true;
+        set_state(VOICE_ERROR);
+        return;
+    }
+    voice_ai_endpoint(cfg.ai_url, s_url, sizeof(s_url));
+    ESP_LOGI(TAG, "Voice AI endpoint %s (conversationId=%s)", s_url, cfg.ai_conversation_id);
+    s_rest_open = true;
+    s_ws_connected = true;
+    s_dg.attempts++;
+    s_dg.connects++;
+    s_dg.connected_us = esp_timer_get_time();
+    s_dg.last_beat_us = s_dg.connected_us;
+    s_link_up_us = s_dg.connected_us;
+    net_set_power_save(false);                /* full Wi-Fi speed for the uploads */
+    if (s_state == VOICE_CONNECTING || s_state == VOICE_ERROR || s_state == VOICE_WAIT_WIFI) {
+        set_note("%s", "");
+        set_state(VOICE_READY);
+    }
+}
+
 /* ----------------------------------------------------- WebSocket lifecycle
  * Runs only in the control task, so starting/stopping never races and never
  * blocks the LVGL task. */
 static void ws_start(void)
 {
+    if (AI_MODE()) {
+        rest_open();
+        return;
+    }
     app_settings_t cfg;
     settings_get(&cfg);
 
@@ -939,6 +1010,13 @@ static void ws_start(void)
 
 static void ws_stop(void)
 {
+    if (s_rest_open) {                        /* Voice AI: nothing to close (a POST in flight finishes by itself) */
+        s_rest_open = false;
+        s_ws_connected = false;
+        s_dg.connected_us = 0;
+        ESP_LOGI(TAG, "Voice AI closed");
+        net_set_power_save(true);
+    }
     xSemaphoreTake(s_ws_mtx, portMAX_DELAY);
     esp_websocket_client_handle_t ws = s_ws;
     s_ws = NULL;
@@ -960,6 +1038,7 @@ static void ws_stop(void)
 static void supervise(void)
 {
     if (s_state != VOICE_THINKING || s_resending) return;   /* the resend manages its own timing */
+    if (s_rest_busy) return;                                /* Voice AI: the POST has its own timeout */
     int64_t now = esp_timer_get_time();
     if (s_tr_audio_wait) {
         /* Translator: the text is on screen and the spoken translation was announced */
@@ -1004,14 +1083,19 @@ static void ctl_task(void *arg)
             continue;
         }
         if (!s_want) {                       /* switched off, or idle timeout */
-            if (s_ws) {
+            if (s_ws || s_rest_open) {
                 ws_stop();
                 ESP_LOGI(TAG, "Disconnected");
             }
             if (s_state != VOICE_DISCONNECTED && s_state != VOICE_ERROR && !s_replaying) set_state(VOICE_DISCONNECTED);
             continue;
         }
-        if (!s_ws && !s_cfg_error) {
+        if (s_rest_open && !net_is_up() && s_state == VOICE_READY) {
+            ws_stop();                       /* Voice AI: Wi-Fi went away; ready again once it's back */
+            set_state(VOICE_WAIT_WIFI);
+            continue;
+        }
+        if (!s_ws && !s_rest_open && !s_cfg_error) {
             if (!net_is_up()) {
                 if (s_state != VOICE_WAIT_WIFI) set_state(VOICE_WAIT_WIFI);
                 continue;
@@ -1024,7 +1108,8 @@ static void ctl_task(void *arg)
 #if VOICE_IDLE_DISCONNECT_MS > 0
         /* close an idle connection, on any screen; tap the mic (or the switch) to reconnect.
          * Not with the wake word on: then the connection has to be ready when you say it. */
-        if (s_state == VOICE_READY && !(s_mode == VOICE_MODE_CHAT && voice_wake_status() == WAKE_ON) &&
+        if (s_state == VOICE_READY && !AI_MODE() &&     /* Voice AI holds no connection open */
+            !(s_mode == VOICE_MODE_CHAT && voice_wake_status() == WAKE_ON) &&
             voice_idle_us() > (int64_t)VOICE_IDLE_DISCONNECT_MS * 1000) {
             ESP_LOGI(TAG, "Idle for %d min: disconnecting", VOICE_IDLE_DISCONNECT_MS / 60000);
             s_want = false;
@@ -1040,7 +1125,8 @@ void voice_set_mode(voice_mode_t mode)
 {
     if (s_active || mode == s_mode) return;   /* only between apps */
     s_mode = mode;
-    ESP_LOGI(TAG, "Mode: %s", mode == VOICE_MODE_TRANSLATE ? "Translator" : "Voice chat");
+    ESP_LOGI(TAG, "Mode: %s", mode == VOICE_MODE_TRANSLATE ? "Translator" :
+             mode == VOICE_MODE_AI_CHAT ? "Voice AI" : "Voice chat");
 }
 
 voice_mode_t voice_mode(void) { return s_mode; }
@@ -1098,6 +1184,7 @@ void voice_reconnect_when_idle(void)
 void voice_set_active(bool active)
 {
     if (active == s_active) return;
+    s_gen++;                                 /* a Voice AI reply still on its way is dropped */
     s_restart_pending = false;
     s_tr_audio_wait = false;
     if (active) {
@@ -1143,6 +1230,14 @@ void voice_new_conversation(void)
     if (s_active && s_want) voice_reconnect();
 }
 
+void voice_new_ai_conversation(void)
+{
+    char id[SET_CONV_LEN + 1];
+    settings_new_ai_conversation(id, sizeof(id));
+    /* the ID goes with each request: nothing to reconnect */
+    if (s_active && AI_MODE()) text_clear();
+}
+
 void voice_set_connected(bool on)
 {
     if (on == s_want) return;
@@ -1175,7 +1270,7 @@ void voice_ptt_press(void)
         voice_set_connected(true);
         return;
     }
-    if (s_resending || s_state != VOICE_READY || !s_ws_connected || s_recording) return;
+    if (s_resending || s_rest_busy || s_state != VOICE_READY || !s_ws_connected || s_recording) return;
     s_rec_cancel = false;
     s_recording = true;
     if (s_wl_running) {
@@ -1230,6 +1325,245 @@ static bool send_wav(const uint8_t *wav, size_t total)
     return ok;
 }
 
+/* ------------------------------------------------------------ Voice AI (REST)
+ * One turn = one HTTPS POST, made from rec_task (it blocks until the whole reply is in). */
+
+/* Writes all of buf (esp_http_client_write can take less than it was given). */
+static bool http_write_all(esp_http_client_handle_t c, const char *buf, size_t len)
+{
+    while (len > 0) {
+        int w = esp_http_client_write(c, buf, (int)(len > 4096 ? 4096 : len));
+        if (w <= 0) return false;
+        buf += w;
+        len -= (size_t)w;
+    }
+    return true;
+}
+
+/* Text for an error reply: {"error":{"code":"...","message":"...","stage":"..."}} or just a status */
+static void ai_error_note(int status, cJSON *root)
+{
+    static char m[NOTE_MAX_CHARS + 1];        /* rec_task only */
+    cJSON *e = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "error") : NULL;
+    const char *code = cJSON_IsObject(e) ? json_str(e, "code") : NULL;
+    const char *msg = cJSON_IsObject(e) ? json_str(e, "message") : NULL;
+    const char *stage = cJSON_IsObject(e) ? json_str(e, "stage") : NULL;
+    if (!msg && cJSON_IsString(e)) msg = e->valuestring;           /* {"error":"..."} */
+    if (!msg && cJSON_IsObject(root)) msg = json_str(root, "message");
+    ESP_LOGE(TAG, "Voice AI error: HTTP %d%s%s%s%s: %s", status, code ? " " : "", code ? code : "",
+             stage ? " at " : "", stage ? stage : "", msg ? msg : "-");
+
+    if (code && strcmp(code, "no_speech") == 0) { set_note("Didn't catch that - try again"); return; }
+    if (status == 401 || status == 403) { set_note("Server refused (HTTP %d) - check the API key", status); return; }
+    if (status == 404) { set_note("HTTP 404 - check the server URL"); return; }
+    if (status == 413) { set_note("Recording too large for the server"); return; }
+    if (status == 429) { set_note("Server busy (HTTP 429) - try again soon"); return; }
+    if (msg && msg[0]) {
+        text_to_ascii(msg, m, sizeof(m));
+        set_note("%s", m);
+        return;
+    }
+    set_note(status >= 500 ? "Server error (HTTP %d)" : "HTTP %d from the server", status);
+}
+
+/* The 200 reply: show transcript + reply, queue the decoded audio for play_task. */
+static void ai_handle_reply(cJSON *root)
+{
+    static char t[1024];                      /* rec_task only */
+    const char *transcript = json_str(root, "transcript");
+    const char *reply = json_str(root, "reply");
+    const char *b64 = json_str(root, "audioBase64");
+    const char *mime = json_str(root, "mimeType");
+    cJSON *ms = cJSON_GetObjectItem(root, "processingMs");
+
+    if (transcript) {
+        text_to_ascii(transcript, t, sizeof(t));
+        ESP_LOGI(TAG, "Heard: %s", t);
+        set_heard(t);
+    }
+    if (reply) {
+        text_to_ascii(reply, t, sizeof(t));
+        ESP_LOGI(TAG, "Reply: %s", t);
+        reply_append(t);
+        s_got_text = true;
+    }
+    if (cJSON_IsNumber(ms)) ESP_LOGI(TAG, "Server took %d ms", ms->valueint);
+
+    size_t b64_len = b64 ? strlen(b64) : 0;
+    if (b64_len < 4) {
+        ESP_LOGW(TAG, "Reply has no audio");
+        if (!transcript && !reply) set_note("Empty reply from the server");
+        set_state(VOICE_READY);
+        return;
+    }
+    size_t cap = b64_len / 4 * 3 + 3, len = 0;
+    uint8_t *audio = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!audio || mbedtls_base64_decode(audio, cap, &len, (const unsigned char *)b64, b64_len) != 0 || len == 0) {
+        ESP_LOGE(TAG, "Couldn't decode the reply audio (%u base64 chars)", (unsigned)b64_len);
+        heap_caps_free(audio);
+        set_note("Couldn't play the reply audio");
+        set_state(VOICE_READY);
+        return;
+    }
+    ESP_LOGI(TAG, "Received %u bytes of reply audio (%s)", (unsigned)len, mime ? mime : "?");
+    play_item_t item = { .data = audio, .len = len };
+    if (!LIVE() || xQueueSend(s_play_q, &item, 0) != pdTRUE) {
+        heap_caps_free(audio);
+        set_state(VOICE_READY);
+    }
+    /* play_task shows SPEAKING, then READY when it's done */
+}
+
+/* Sends the WAV in s_wav (wav_len bytes) and handles the reply. Runs in rec_task. */
+static void rest_turn(size_t wav_len)
+{
+    const uint32_t gen = s_gen;
+    app_settings_t cfg;
+    settings_get(&cfg);
+
+    /* URL: endpoint + options. The API key goes in a header, never in the URL or the log. */
+    static char url[sizeof(s_url) + 160];
+    char conv_enc[3 * SET_CONV_LEN + 1];
+    url_encode(cfg.ai_conversation_id, conv_enc, sizeof(conv_enc));
+    int n = snprintf(url, sizeof(url), "%s%sformat=%s&conversationId=%s", s_url, strchr(s_url, '?') ? "&" : "?",
+                     AI_CHAT_FORMAT, conv_enc);
+    if (AI_CHAT_LANGUAGE[0] && n > 0 && (size_t)n < sizeof(url))
+        n += snprintf(url + n, sizeof(url) - n, "&language=%s", AI_CHAT_LANGUAGE);
+    if (AI_CHAT_VOICE[0] && n > 0 && (size_t)n < sizeof(url))
+        snprintf(url + n, sizeof(url) - n, "&voice=%s", AI_CHAT_VOICE);
+
+    /* multipart/form-data with one "file" part */
+    char boundary[40], head[256], tail[56], ctype[80];
+    snprintf(boundary, sizeof(boundary), "----FusionApps%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
+    int head_len = snprintf(head, sizeof(head),
+                            "--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"question.wav\"\r\n"
+                            "Content-Type: audio/wav\r\n\r\n", boundary);
+    int tail_len = snprintf(tail, sizeof(tail), "\r\n--%s--\r\n", boundary);
+    snprintf(ctype, sizeof(ctype), "multipart/form-data; boundary=%s", boundary);
+    size_t body_len = (size_t)head_len + wav_len + (size_t)tail_len;
+
+    char host[128];
+    url_host(s_url, host, sizeof(host));
+    esp_http_client_config_t hc = {
+        .url = url,
+        .method = HTTP_METHOD_POST,
+        .timeout_ms = AI_CHAT_TIMEOUT_MS,
+        .disable_auto_redirect = true,
+        .buffer_size = 4096,
+        .buffer_size_tx = 2048,
+    };
+    if (strncmp(url, "https://", 8) == 0) {
+        if (strcasecmp(host, settings_build_host()) == 0) {
+            hc.cert_pem = server_ca_pem_start;           /* the chain fetched at build time */
+        } else {
+            hc.crt_bundle_attach = esp_crt_bundle_attach; /* any other server: built-in CA bundle */
+        }
+    }
+
+    s_rest_busy = true;
+    int64_t t0 = esp_timer_get_time();
+    char *body = NULL;
+    size_t got = 0;
+    int status = 0;
+    const char *fail = NULL;                  /* note for a network failure */
+
+#if VOICE_DIAG
+    ESP_LOGI(DTAG, "POST %s (%s): %u bytes (WAV %u) | heap int %u KB (dma blk %u KB)", s_url,
+             hc.cert_pem ? "server_ca.pem" : "built-in CA bundle", (unsigned)body_len, (unsigned)wav_len,
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) / 1024));
+#endif
+    esp_http_client_handle_t c = esp_http_client_init(&hc);
+    if (!c) {
+        fail = "Could not start the request";
+    } else {
+        esp_http_client_set_header(c, "Content-Type", ctype);
+        esp_http_client_set_header(c, "Accept", "application/json");
+        if (cfg.ai_api_key[0]) esp_http_client_set_header(c, "x-api-key", cfg.ai_api_key);
+
+        esp_err_t err = esp_http_client_open(c, (int)body_len);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Can't connect to %s: %s", host, esp_err_to_name(err));
+            fail = "Can't reach the server - check the URL";
+        } else if (!http_write_all(c, head, head_len) || !http_write_all(c, (const char *)s_wav, wav_len) ||
+                   !http_write_all(c, tail, tail_len)) {
+            ESP_LOGE(TAG, "Upload to %s failed", host);
+            fail = "Send failed - try again";
+        } else {
+            int64_t t_sent = esp_timer_get_time();
+            s_dg.last_tx_us = t_sent;
+            s_dg.tx_frames++;
+            s_dg.tx_bytes += body_len;
+#if VOICE_DIAG
+            ESP_LOGI(DTAG, "tx multipart %u bytes in %lld ms; waiting for the reply", (unsigned)body_len,
+                     (long long)((t_sent - t0) / 1000));
+#endif
+            int64_t clen = esp_http_client_fetch_headers(c);
+            status = esp_http_client_get_status_code(c);
+            if (clen < 0 || status <= 0) {
+                ESP_LOGE(TAG, "No reply from %s within %d s", host, AI_CHAT_TIMEOUT_MS / 1000);
+                fail = "No reply from the server";
+            } else {
+                size_t cap = clen > 0 ? (size_t)clen + 1 : 64 * 1024;
+                if (cap > AI_RX_MAX_BYTES) cap = AI_RX_MAX_BYTES;
+                body = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                while (body) {
+                    if (got + 1 >= cap) {     /* chunked reply: grow */
+                        if (cap >= AI_RX_MAX_BYTES) { fail = "Reply too large"; break; }
+                        size_t ncap = cap * 2 > AI_RX_MAX_BYTES ? AI_RX_MAX_BYTES : cap * 2;
+                        char *nb = heap_caps_realloc(body, ncap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                        if (!nb) break;
+                        body = nb;
+                        cap = ncap;
+                    }
+                    int r = esp_http_client_read(c, body + got, (int)(cap - 1 - got));
+                    if (r < 0) { fail = "Connection lost while receiving"; break; }
+                    if (r == 0) break;
+                    got += (size_t)r;
+                }
+                if (!body) fail = "Out of memory for the reply";
+                else body[got] = '\0';
+            }
+        }
+        esp_http_client_close(c);
+        esp_http_client_cleanup(c);
+    }
+    s_rest_busy = false;
+    int64_t ms = (esp_timer_get_time() - t0) / 1000;
+    s_last_rx_us = esp_timer_get_time();
+    s_dg.last_rx_us = s_last_rx_us;
+    if (got) { s_dg.rx_frames++; s_dg.rx_bytes += got; }
+#if VOICE_DIAG
+    ESP_LOGI(DTAG, "Voice AI turn: HTTP %d, %u bytes in %lld ms%s%s", status, (unsigned)got, (long long)ms,
+             fail ? " - " : "", fail ? fail : "");
+#endif
+
+    if (gen != s_gen || !LIVE()) {            /* left the app (or switched off) meanwhile: drop it */
+        ESP_LOGI(TAG, "Dropped a Voice AI reply (the app closed)");
+        heap_caps_free(body);
+        return;
+    }
+    if (fail && !(status > 0 && got > 0)) {
+        set_note("%s", fail);
+        set_state(VOICE_READY);
+        heap_caps_free(body);
+        return;
+    }
+    cJSON *root = got ? cJSON_ParseWithLength(body, got) : NULL;
+    heap_caps_free(body);                     /* the parsed copy is all that's needed now */
+    if (status == 200 && cJSON_IsObject(root)) {
+        ai_handle_reply(root);
+    } else if (status == 200) {
+        ESP_LOGE(TAG, "Voice AI reply isn't JSON (%u bytes)", (unsigned)got);
+        set_note("Bad reply from the server");
+        set_state(VOICE_READY);
+    } else {
+        ai_error_note(status, root);
+        set_state(VOICE_READY);
+    }
+    cJSON_Delete(root);
+}
+
 /* Sends the first n samples of s_wav as one turn, resending once over a new connection if the
  * link broke mid-send. Runs in rec_task only (the send can block for up to ~35 s). */
 static void send_turn(size_t n)
@@ -1247,6 +1581,11 @@ static void send_turn(size_t n)
     s_turn_start_us = esp_timer_get_time();
     s_last_rx_us = s_turn_start_us;
     set_state(VOICE_THINKING);
+
+    if (AI_MODE()) {
+        rest_turn(total);
+        return;
+    }
 
     int conn_before = s_dg.connects;
     bool ok = send_wav(s_wav, total);
@@ -1408,13 +1747,13 @@ void voice_set_foreground(bool on)
 
 static bool wake_should_run(void)
 {
-    return s_mode == VOICE_MODE_CHAT && s_wn_name && s_wake_enabled && !s_wake_nomem && s_audio_ok &&
+    return WAKE_MODE() && s_wn_name && s_wake_enabled && !s_wake_nomem && s_audio_ok &&
            s_active && s_fg && s_want;
 }
 
 static bool ready_for_turn(void)
 {
-    return s_state == VOICE_READY && s_ws_connected && !s_resending;
+    return s_state == VOICE_READY && s_ws_connected && !s_resending && !s_rest_busy;
 }
 
 static void make_chime(void)
@@ -1567,7 +1906,8 @@ static void wake_task(void *arg)
             /* Start once the screen has slid in and the server connection is up: the slide and the
              * TLS handshake need internal RAM too, and together with the AFE's startup that was
              * enough to make the display drop frames. Also wait for hold to talk to finish. */
-            if (s_rec_busy || !s_ws_connected || s_state != VOICE_READY) {
+            if (s_rec_busy || !s_ws_connected || s_state != VOICE_READY ||
+                esp_timer_get_time() - s_link_up_us < LINK_SETTLE_US) {
                 ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
                 continue;
             }
@@ -2053,9 +2393,10 @@ esp_err_t voice_init(void)
 
     /* Task stacks go in PSRAM where they can: internal RAM is what the display (and the wake word)
      * run short of. These tasks never write to flash, which is what a PSRAM stack can't do. */
-    if (xTaskCreatePinnedToCoreWithCaps(rec_task, "rec", 6 * 1024, NULL, 6, &s_rec_task, 1,
+    /* 12 KB: Voice AI's HTTPS requests (TLS handshake) run in this task too */
+    if (xTaskCreatePinnedToCoreWithCaps(rec_task, "rec", 12 * 1024, NULL, 6, &s_rec_task, 1,
                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
-        xTaskCreatePinnedToCore(rec_task, "rec", 6 * 1024, NULL, 6, &s_rec_task, 1);
+        xTaskCreatePinnedToCore(rec_task, "rec", 12 * 1024, NULL, 6, &s_rec_task, 1);
     }
     /* the MP3 decoder needs ~16 KB of stack scratch: put this task's stack in PSRAM */
     if (xTaskCreatePinnedToCoreWithCaps(play_task, "play", 32 * 1024, NULL, 6, NULL, 1,

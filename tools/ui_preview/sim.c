@@ -172,13 +172,15 @@ int main(int argc, char **argv)
     shot("01_home_dark");
     swipe(CX(320), MY(250), CX(160), MY(250));           /* carousel: next app */
     step(600);
-    shot("01b_home_swiped_translator");
+    shot("01b_home_swiped_voice_ai");
+    swipe(CX(320), MY(250), CX(160), MY(250)); step(600);
+    shot("01b2_home_swiped_translator");
     swipe(CX(320), MY(250), CX(160), MY(250)); step(600);
     swipe(CX(320), MY(250), CX(160), MY(250)); step(600);
     shot("01c_home_swiped_settings");
     swipe(CX(320), MY(250), CX(160), MY(250)); step(600);  /* past the last: stays on Settings */
     shot("01d_home_last");
-    for (int i = 0; i < 3; i++) { swipe(CX(160), MY(250), CX(320), MY(250)); step(600); }
+    for (int i = 0; i < 4; i++) { swipe(CX(160), MY(250), CX(320), MY(250)); step(600); }
 
     tap_app("Voice chat");
     printf("voice active=%d\n", g_vactive);
@@ -284,6 +286,7 @@ int main(int argc, char **argv)
     }
     shot("19_settings_light");
     swipe(CX(233), MY(380), CX(233), MY(100));
+    swipe(CX(233), MY(380), CX(233), MY(100));           /* (two: Settings got longer with Voice AI) */
     tap_text("Reset settings");
     shot("20_confirm");
     tap_text("Cancel");
@@ -513,7 +516,48 @@ int main(int argc, char **argv)
     shot("91_translator_reconnected");
     swipe(CX(120), MY(300), CX(360), MY(300));           /* Home */
     printf("voice active=%d (want 0)\n", g_vactive);
-    shot("92_home_four_apps");
+    shot("92_home_apps");
+
+    /* ---- Voice AI (dark): same screen as Voice chat, its own server and colors */
+    g_vs = VOICE_READY; g_want = true; g_heard[0] = g_reply[0] = g_note[0] = 0; bump();
+    tap_app("Voice AI");
+    printf("voice mode=%d active=%d (want 2 1)\n", g_vmode, g_vactive);
+    shot("93_voice_ai_ready");
+    hold(CX(233), MY(250));
+    shot("94_voice_ai_listening");
+    release();
+    shot("95_voice_ai_thinking");
+    strcpy(g_heard, "\"Give me a quick tip for a rainy weekend in Boston.\"");
+    strcpy(g_reply, "Spend Saturday at the Museum of Fine Arts, then warm up with chowder in the North End. Sunday, catch a matinee in the Theater District.");
+    g_vs = VOICE_SPEAKING; bump();
+    shot("96_voice_ai_reply");
+    g_vs = VOICE_READY; g_heard[0] = g_reply[0] = 0; strcpy(g_note, "Didn't catch that - try again"); bump();
+    shot("97_voice_ai_no_speech");
+    g_note[0] = 0; bump();
+    swipe(CX(233), MY(330), CX(233), MY(170));           /* swipe up -> Voice AI server */
+    shot("98_voice_ai_server");
+    tap_text("Server URL");
+    shot("99_voice_ai_url_editor");
+    tap(CX(233 - 130), TY(52));
+    step(400);
+    swipe(CX(233), MY(180), CX(233), MY(340));           /* back down */
+    g_vs = VOICE_READY; strcpy(g_note, "HTTP 404 - check the server URL"); bump();
+    shot("99a_voice_ai_error");
+    g_vs = VOICE_READY; g_note[0] = 0; bump();
+    swipe(CX(330), MY(250), CX(120), MY(250));           /* Home */
+    printf("voice active=%d (want 0)\n", g_vactive);
+    tap_app("Settings");
+    {
+        lv_obj_t *l = find_text(lv_screen_active(), "VOICE AI");
+        if (l) lv_obj_scroll_to_view_recursive(l, LV_ANIM_OFF);
+        lv_obj_t *list = l ? lv_obj_get_parent(l) : NULL;
+        while (list && !lv_obj_has_flag(list, LV_OBJ_FLAG_SCROLLABLE)) list = lv_obj_get_parent(list);
+        if (list) lv_obj_scroll_by(list, 0, -60, LV_ANIM_OFF);
+        step(1100);
+    }
+    shot("99b_settings_voice_ai");
+    tap_text(ICON_LEFT);
+    step(400);
 
     /* ---- battery states on Home (dark) + Settings > System */
     ui_theme_set_dark(true); ui_nav_refresh(); step(300);

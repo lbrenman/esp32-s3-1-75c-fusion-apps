@@ -84,6 +84,17 @@
 #define TR_PATH                "/translate"  /* added to the base URL */
 #define TR_AUDIO_WAIT_MS       15000         /* TRANSLATION announced audio: give up waiting after this */
 
+/* Voice AI app: a second voice assistant, for the Voice AI Chat API (REST, not WebSocket).
+ * Each turn is one HTTPS POST of the recording as multipart/form-data (a "file" part, 16 kHz mono
+ * WAV) to <base>/voice-ai-chat?format=mp3&conversationId=..., with the API key in the x-api-key
+ * header. The JSON reply has transcript, reply and audioBase64 (the spoken reply).
+ * The base URL and API key are in secrets.h (first boot) and on the device (swipe up). */
+#define AI_CHAT_PATH         "/voice-ai-chat"   /* added to the base URL */
+#define AI_CHAT_FORMAT       "mp3"              /* reply audio: "mp3" (smaller) or "wav" */
+#define AI_CHAT_LANGUAGE     ""                 /* "" = the server detects it; or "en", "es"... (also the reply's language) */
+#define AI_CHAT_VOICE        ""                 /* "" = the server's default voice; or e.g. "voice_478" */
+#define AI_CHAT_TIMEOUT_MS   60000              /* one turn is three model calls: allow time */
+
 /* Phone settings page (web_settings.c): a small web server on the watch. Open
  * http://WEB_HOSTNAME.local (or the IP shown in Settings > Phone) on a phone or computer on the same
  * Wi-Fi, enter the PIN shown in Settings > Phone, and change the same settings as on the watch

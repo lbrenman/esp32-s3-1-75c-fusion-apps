@@ -15,7 +15,7 @@
 :root {
   --bg: #f2f2f7; --card: #fff; --text: #1c1c1e; --dim: #6e6e73; --line: #d8d8dc;
   --accent: #2f8cff; --ok: #30c26a; --warn: #ff9f0a; --err: #ff453a; --field: #f2f2f7;
-  --voice: #7c5cff; --tr: #14b8c8; --stocks: #30c26a; --sys: #8e9aaf;
+  --voice: #7c5cff; --ai: #ff8a3d; --tr: #14b8c8; --stocks: #30c26a; --sys: #8e9aaf;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #000; --card: #1c1c1e; --text: #f2f2f7; --dim: #98989f; --line: #38383a; --field: #2c2c2e; }
@@ -128,6 +128,24 @@ input[type=range] { width: 100%; margin: 12px 0 4px; accent-color: var(--accent)
     <div class="row">
       <div class="line"><span class="label">Conversation</span><span class="val mono" id="conv"></span></div>
       <div class="btns"><button class="plain" id="newConv">New conversation</button></div>
+    </div>
+  </div>
+
+  <h2><i style="background:var(--ai)"></i>Voice AI</h2>
+  <div class="card">
+    <div class="row">
+      <div class="line"><span class="label">Server base URL</span></div>
+      <input type="url" id="ai_url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://host:port/voice-ai-chat-api">
+      <div class="btns"><button data-save="ai_url" disabled>Save</button><button class="plain" data-default="ai_url">Use secrets.h URL</button></div>
+    </div>
+    <div class="row">
+      <div class="line"><span class="label">API key</span><span class="val" id="ai_key_info"></span></div>
+      <input type="password" id="ai_key" autocomplete="off" placeholder="New API key">
+      <div class="btns"><button data-save="ai_key" disabled>Save</button></div>
+    </div>
+    <div class="row">
+      <div class="line"><span class="label">Conversation</span><span class="val mono" id="aiConv"></span></div>
+      <div class="btns"><button class="plain" id="newAiConv">New conversation</button></div>
     </div>
   </div>
 
@@ -300,23 +318,25 @@ function render() {
   $("statusLine").textContent = parts.join(" · ") || "Connected to the watch";
 
   // text fields: only when the user isn't editing them
-  for (const id of ["ws_url", "tr_url", "mcp_url"]) {
+  for (const id of ["ws_url", "ai_url", "tr_url", "mcp_url"]) {
     if (!dirty.has(id)) $(id).value = s[id];
     const d = state.defaults[id];
     document.querySelector('[data-default="' + id + '"]').classList.toggle("hidden", !d || d === s[id]);
   }
   $("ws_key_info").textContent = keyInfo(s.ws_key_set, s.ws_key_tail);
+  $("ai_key_info").textContent = keyInfo(s.ai_key_set, s.ai_key_tail);
   $("tr_key_info").textContent = keyInfo(s.tr_key_set, s.tr_key_tail);
   $("mcp_key_info").textContent = keyInfo(s.mcp_key_set, s.mcp_key_tail);
 
   $("wake_word").checked = s.wake_word;
   $("wakeHint").textContent = {
-    on: "Say “Jarvis” while Voice chat is open.",
+    on: "Say “Jarvis” while Voice chat or Voice AI is open.",
     off: "Off: hold to talk.",
     no_model: "No wake word model on the watch: run idf.py flash.",
     no_memory: "Paused: the watch is low on memory.",
   }[st.wake] || "";
   $("conv").textContent = s.conversation.slice(0, 8) + "…" + s.conversation.slice(-4);
+  $("aiConv").textContent = s.ai_conversation.slice(0, 8) + "…" + s.ai_conversation.slice(-4);
 
   langOptions($("tr_src"), "source", s.tr_src);
   langOptions($("tr_dst"), "target", s.tr_dst);
@@ -350,7 +370,8 @@ async function load() {
 }
 
 /* ------------------------------------------------------------------ wiring */
-const keyFields = { ws_key: "ws_key", tr_key: "tr_key", mcp_key: "mcp_key" };
+const keyFields = { ws_key: "ws_key", ai_key: "ai_key", tr_key: "tr_key", mcp_key: "mcp_key" };
+const httpUrls = { mcp_url: true, ai_url: true };   // the others are wss://
 for (const btn of document.querySelectorAll("[data-save]")) {
   const id = btn.dataset.save, input = $(id);
   input.addEventListener("input", () => {
@@ -361,8 +382,8 @@ for (const btn of document.querySelectorAll("[data-save]")) {
   btn.onclick = async () => {
     const v = input.value.trim();
     if (id.endsWith("_url")) {
-      const ok = id === "mcp_url" ? /^https?:\/\//.test(v) : /^wss?:\/\//.test(v);
-      if (!ok) { toast(id === "mcp_url" ? "Start the URL with https://" : "Start the URL with wss://", true); return; }
+      const ok = httpUrls[id] ? /^https?:\/\//.test(v) : /^wss?:\/\//.test(v);
+      if (!ok) { toast(httpUrls[id] ? "Start the URL with https://" : "Start the URL with wss://", true); return; }
     }
     btn.disabled = true;
     const done = await save({ [id]: v }, id.endsWith("_key") ? "API key saved" : "Saved - the watch reconnects");
@@ -409,6 +430,9 @@ async function action(name, msg) {
 }
 $("newConv").onclick = () => {
   if (confirm("Start a new conversation? The voice server forgets what you talked about.")) action("new_conversation", "New conversation started");
+};
+$("newAiConv").onclick = () => {
+  if (confirm("Start a new Voice AI conversation? The assistant forgets what you talked about.")) action("new_ai_conversation", "New conversation started");
 };
 $("stocksRefresh").onclick = () => action("stocks_refresh", "Refreshing");
 $("restart").onclick = async () => {

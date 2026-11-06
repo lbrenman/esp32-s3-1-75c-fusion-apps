@@ -4,6 +4,8 @@ A small "watch OS" for the Waveshare **ESP32-S3-Touch-AMOLED-1.75C** (round) and
 **ESP32-S3-Touch-AMOLED-2.06** (watch style, see "Boards"): a home screen with a clock and
 app icons, a **Voice chat** app (client for the [Amplify Fusion WebSocket voice server](https://github.com/lbrenman/Amplify-Fusion-AI-Voice-Chat-Demo-Using-Mistral): say "Jarvis" or
 hold to talk),
+a **Voice AI** app (the same voice assistant for the Voice AI Chat API: one HTTPS request per turn,
+the recording uploaded as `multipart/form-data`),
 a **Translator** app (push-to-talk voice translator for the [Amplify Fusion translator server](https://github.com/lbrenman/GitHubAmplify-Fusion-Voice-Translation-and-Transcription-Demo-Using-Mistral-and-AWS-Translate): speak
 English, hear Spanish; also shows Hindi, Arabic and Russian text),
 a **Stocks** app (watchlist client for the [FusionStockWatchListMCP server](https://github.com/lbrenman/Amplify-Fusion-Stock-Watch-List-MCP), an Amplify Fusion MCP
@@ -20,12 +22,22 @@ the device.*
 
 ![Translator](docs/screenshots/translator.png)
 
+![Voice AI](docs/screenshots/voice_ai.png)
+
 ![On the 2.06](docs/screenshots/board_2_06.png)
 
 > **The 2.06 build runs on the board.** Its screens use the larger rectangular display: bigger
 > text, rows, buttons and orbs, and fewer of the edge fades the round screen needs. Every screen
 > is checked at 410x502 in `tools/ui_preview` (`make BOARD=2_06`). The 1.75C build is unchanged
 > (its screens are pixel-identical to before).
+
+> **Voice AI is new and untested on the board.** It reuses the Voice chat engine (recording, wake
+> word, MP3 playback) and screen. The new part is the transport: an HTTPS `POST` with the WAV as a
+> multipart `file` part, a JSON reply with the audio in base64. That code compiles cleanly against
+> the ESP-IDF 5.5.2 `esp_http_client`, mbedTLS and cJSON headers, the multipart body was checked with
+> a standard form parser, and the screens are checked in `tools/ui_preview` on both boards, but it
+> hasn't been built with `idf.py` or talked to the real API yet. Watch the `vdiag` lines on the
+> first turn.
 
 > **The Translator is new and untested on the board.** It reuses the Voice chat engine (recording,
 > WebSocket, MP3 playback), so most of its path is code that already runs on the device. The new
@@ -59,6 +71,8 @@ the device.*
 | **Home** | Battery level and charging state, date and time (from NTP), the apps in a carousel (swipe left/right, tap to open), Wi-Fi status, day/night button |
 | **Voice chat** | Say "Jarvis" and your request (wake word), or hold to talk and release to send. Shows what the server heard and its reply, plays the reply audio |
 | **Voice server** (swipe up/down in Voice chat) | See and change the server URL and API key, connect/disconnect switch with status, reset URL to `secrets.h` |
+| **Voice AI** | Same as Voice chat (say "Jarvis", tap, or hold to talk), with orange colors, for the Voice AI Chat API. Its own server, API key and conversation |
+| **Voice AI server** (swipe up/down in Voice AI) | See and change the API's base URL and API key, on/off switch ("Ready" when it's usable), reset URL to `secrets.h`, new conversation |
 | **Translator** | Pick the languages on the language bar (English → Spanish at first), hold to talk, release to send. Shows what you said and the translation (with accents, and in Hindi, Arabic or Russian script), and speaks the translation. **Replay** plays it again |
 | **Languages** (tap the language bar) | **From** (13 languages you can speak) and **Into** (9 it can speak back), and **Swap**. Saved on the device |
 | **Translator server** (swipe up/down in Translator) | See and change the translator's base URL and API key, connect/disconnect switch with status, reset URL to `secrets.h`, shortcut to Languages |
@@ -66,8 +80,8 @@ the device.*
 | **Quote** (tap a row in Stocks) | A detailed quote from `GetStockQuote`: price, change, open, previous close and the day's range (low–high with today's price marked). Refresh and remove buttons |
 | **Pick symbols** (+ or swipe left in Stocks) | Tabs of preset symbols (**QQQ 1**, **QQQ 2**, **Blue Chip**) and **Other** (watchlist symbols not on a tab, e.g. added from Claude). Tap to add (green) or remove (gray) |
 | **Stock server** (gear in Stocks) | See and change the MCP server URL and API key, connection status, refresh now, reset URL to `secrets.h` |
-| **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new) and wake word on/off, phone settings page (on/off, address, PIN), battery (%, state, voltage), version and free memory, restart, reset |
-| **Phone settings page** (in a browser) | `http://fusion-apps.local` on the same Wi-Fi, after the PIN from Settings > Phone: server URLs and API keys for Voice chat, Translator and Stocks, Translator languages, wake word, new conversation, Stocks auto refresh, dark mode, brightness, volume, battery and memory, restart. Everything except Wi-Fi |
+| **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new) and wake word on/off, Voice AI conversation (show / start new), phone settings page (on/off, address, PIN), battery (%, state, voltage), version and free memory, restart, reset |
+| **Phone settings page** (in a browser) | `http://fusion-apps.local` on the same Wi-Fi, after the PIN from Settings > Phone: server URLs and API keys for Voice chat, Voice AI, Translator and Stocks, Translator languages, wake word, new conversation (both voice apps), Stocks auto refresh, dark mode, brightness, volume, battery and memory, restart. Everything except Wi-Fi |
 
 ### Gestures
 
@@ -82,6 +96,7 @@ the device.*
 | Voice chat | Swipe up / down | Voice server settings |
 | Voice chat, Voice server | Swipe left / right | Back to Home |
 | Voice server | Swipe up / down, or the ⌄ button | Back to Voice chat |
+| Voice AI, Voice AI server | Same gestures as Voice chat and Voice server | |
 | Translator | Touch and hold | Record while held (up to 10 s); release to send |
 | Translator | Tap the language bar | Languages (From / Into / Swap) |
 | Translator | Tap **Replay** | Play the last spoken translation again (works while disconnected too). Touches within 14 px of the button count as Replay, never as hold to talk |
@@ -103,7 +118,7 @@ then moves at least 60 px within 0.8 s, the touch was a swipe and the recording 
 
 ### The wake word
 
-With **Settings > Voice chat > Wake word** on (the default), the Voice chat screen listens for
+With **Settings > Voice chat > Wake word** on (the default), the Voice chat and Voice AI screens listen for
 "Jarvis" using Espressif's ESP-SR (WakeNet for the word, voice activity detection for the end of
 your request). Everything runs on the board; nothing is sent until you've said the word.
 
@@ -116,9 +131,9 @@ your request). Everything runs on the board; nothing is sent until you've said t
 | Quick tap (under 0.35 s) | Listens the same way, without the word |
 | Touch and hold | Hold to talk, as before |
 
-- It only listens while the **Voice chat screen** itself is showing, with the connection on. On
-  Home, other apps, the Voice server screen, or with the connection switched off, the microphone
-  is off.
+- It only listens while the **Voice chat or Voice AI screen** itself is showing, with the
+  connection on. On Home, other apps, the server screens, or with the connection switched off, the
+  microphone is off.
 - It starts listening once the server connection is up (the green ring), not during the screen's
   slide-in and TLS handshake, which need internal RAM too.
 - Detection is off while a reply is thinking or playing, so the speaker can't wake it.
@@ -149,6 +164,7 @@ as before on the watch; the page is a second way to change the same settings.
 | On the page | What it changes |
 | --- | --- |
 | Voice chat | Server URL, API key, wake word on/off, **New conversation** |
+| Voice AI | Server base URL, API key, **New conversation** |
 | Translator | From / Into languages (with Swap), server base URL, API key |
 | Stocks | Auto refresh, **Refresh now**, MCP server URL, API key |
 | Display and sound | Dark mode, brightness, volume |
@@ -190,8 +206,8 @@ The API, for scripts (all JSON; POSTs need `X-Fusion-Apps: 1`, and all but login
 | `GET /api/state` | | Settings (keys masked), `secrets.h` URLs, status, language list |
 | `POST /api/login` | `{"pin":"123456"}` | Sets the `fa_sid` session cookie |
 | `POST /api/logout` | `{}` | Ends this session |
-| `POST /api/settings` | Any of `ws_url`, `ws_key`, `wake_word`, `tr_url`, `tr_key`, `tr_src` + `tr_dst` (together), `mcp_url`, `mcp_key`, `stocks_auto`, `dark_mode`, `brightness` (5-100), `volume` (0-100) | Changes only the fields sent; unknown names are an error |
-| `POST /api/action` | `{"action":"new_conversation"}`, `"stocks_refresh"` or `"restart"` | |
+| `POST /api/settings` | Any of `ws_url`, `ws_key`, `wake_word`, `ai_url`, `ai_key`, `tr_url`, `tr_key`, `tr_src` + `tr_dst` (together), `mcp_url`, `mcp_key`, `stocks_auto`, `dark_mode`, `brightness` (5-100), `volume` (0-100) | Changes only the fields sent; unknown names are an error |
+| `POST /api/action` | `{"action":"new_conversation"}`, `"new_ai_conversation"`, `"stocks_refresh"` or `"restart"` | |
 
 ### The server connection
 
@@ -331,6 +347,37 @@ RPC error or a tool error) is not retried.
 | Red | Not connected | No usable server URL; the note under the mic says what to fix |
 | Gray | Disconnected | Switched off, or idle timeout; tap to connect |
 
+### Voice AI
+
+A second voice assistant, for the **Voice AI Chat API** (`POST /voice-ai-chat`): the same screen,
+wake word, hold to talk and reply playback as Voice chat, but no WebSocket. Each turn is one HTTPS
+request, like the API's demo web app:
+
+1. You talk (say "Jarvis", tap, or hold). The recording is the same 16 kHz mono WAV as Voice chat.
+2. The watch sends `POST <base>/voice-ai-chat?format=mp3&conversationId=<id>` with the API key in the
+   `x-api-key` header and the WAV as the `file` part of a `multipart/form-data` body. *Thinking...*
+   with the bouncing dots while the server transcribes, asks the chat model and makes the speech.
+3. The JSON reply's `transcript` shows as what it heard, `reply` as the answer, and `audioBase64` is
+   decoded and played (*Speaking...*).
+
+- **Its own conversation.** Voice AI keeps its own `conversationId` (saved on the device, separate from
+  Voice chat's), sent with every turn so the API keeps the history. **New conversation** is on the
+  Voice AI server screen, in **Settings > Voice AI**, and on the phone settings page.
+- **Nothing to stay connected to.** The ring turns green (**Ready** on the server screen) as soon as
+  the URL is usable and Wi-Fi is up; each turn opens its own HTTPS connection and closes it after the
+  reply. So there's no 3-minute idle disconnect. The switch on the server screen still turns the app
+  (and its wake word) off.
+- **Errors** show under the mic, and the app is ready for the next turn: *Didn't catch that - try
+  again* (the API's `no_speech`), *Server refused (HTTP 401) - check the API key*, *HTTP 404 - check
+  the server URL*, *Server busy (HTTP 429)*, *No reply from the server* (after `AI_CHAT_TIMEOUT_MS`,
+  60 s), or the API's own `error.message`.
+- **Options** are in `app_config.h`: `AI_CHAT_FORMAT` (`mp3`), `AI_CHAT_LANGUAGE` (empty = the server
+  detects it) and `AI_CHAT_VOICE` (empty = the server's default voice).
+- **Memory.** The reply (JSON with base64 audio, up to 4 MB) and the decoded audio go to PSRAM. The
+  request runs in the voice engine's recording task, whose stack is in PSRAM (12 KB, for the TLS
+  handshake). Each turn's TLS handshake happens while the wake word engine is running; the
+  `vdiag: POST ... | heap int NN KB (dma blk NN KB)` line shows the internal RAM left when it starts.
+
 ### The Translator
 
 A push-to-talk client for the Amplify Fusion voice translator (the same server the
@@ -443,6 +490,18 @@ The Translator's server is optional in `secrets.h` too:
 ```
 
 Without them the Translator uses `wss://WS_HOST:WS_PORT/translator` and the voice server's API key.
+
+Voice AI's server is optional too:
+
+```c
+#define AI_CHAT_URL         "https://your-fusion-host:4443/voice-ai-chat-api"   // base URL; the app adds /voice-ai-chat
+#define AI_CHAT_API_KEY     "your-voice-ai-api-key"
+```
+
+Without them Voice AI uses `https://WS_HOST:WS_PORT/voice-ai-chat-api` and the voice server's API key.
+A base URL that already ends in `/voice-ai-chat` isn't doubled. As with Stocks, a host other than
+`WS_HOST` is checked against the built-in CA bundle.
+
 The device connects to `<base>/translate?sourceLanguage=en&targetLanguage=es&x-api-key=<key>`; a base
 URL that already ends in `/translate` isn't doubled, and one ending in `/speech` is switched to
 `/translate` (as in the web app). The Translator server screen shows the full endpoint.
@@ -495,9 +554,10 @@ esp32-s3-1-75c-fusion-apps/
 │       ├── apps.c/.h              the app list shown on Home
 │       ├── app_home.c             Home screen
 │       ├── app_settings.c         Settings app (+ Wi-Fi scan screen)
-│       ├── app_voice.c            Voice chat screen + Voice server screen
-│       ├── voice_core.c, voice.h  recording, wake word, WebSocket, playback (no LVGL in here);
-│       │                          Voice chat and Translator modes
+│       ├── app_voice.c            Voice chat and Voice AI: talk screen + server screen (one file,
+│       │                          two apps: voice_flavor_t says which server)
+│       ├── voice_core.c, voice.h  recording, wake word, WebSocket or HTTPS, playback (no LVGL in here);
+│       │                          Voice chat, Voice AI and Translator modes
 │       ├── app_translate.c        Translator: main screen, Languages + pickers, Translator server
 │       ├── translate_langs.c/.h   the language lists and pair rules (pure C)
 │       ├── app_stocks.c           Stocks: Watchlist, Quote, Pick symbols and Stock server screens
@@ -682,6 +742,7 @@ The click-through script places taps and swipes from the screen's center and edg
 Change the fake values in `stubs.c` or the click-through script in `sim.c` to preview other states.
 The Stocks screens use a fake watchlist (`stocks_fake_load()` in `stubs.c`); shots `40_` to `59_`.
 The Translator screens are shots `70_` to `92_` (fake translations set in `sim.c`).
+Voice AI is shots `93_` to `99b_` (its screens, its server screen, an error, Settings > Voice AI).
 Settings > Phone (the phone settings page's switch, address and PIN) is shots `15e_` to `15i_`.
 
 ## Test the Stocks parsing on your Mac
@@ -709,6 +770,8 @@ make                      # first run clones cJSON; prints "N checks, 0 failed"
 | `app_config.h` + `sdkconfig.defaults` | The wake word: `WAKE_WORD_LABEL`, `WAKE_WORD_MODEL` and `CONFIG_SR_WN_WN9_JARVIS_TTS=y` | Jarvis. For "Computer": `"Computer"`, `"computer"` and `CONFIG_SR_WN_WN9_COMPUTER_TTS=y` (remove the Jarvis line), then `rm sdkconfig && idf.py set-target esp32s3 && idf.py build flash` |
 | `app_config.h` | `DEFAULT_DARK_MODE`, `DEFAULT_BRIGHTNESS`, `DEFAULT_VOLUME` | dark, 80 %, 75 % (first boot) |
 | `apps/voice_core.c` | `REC_MAX_SECONDS`, `TURN_TIMEOUT_US`, `RX_MAX_BYTES` | 10 s, 45 s, 3 MB |
+| `app_config.h` | `AI_CHAT_PATH`, `AI_CHAT_FORMAT`, `AI_CHAT_LANGUAGE`, `AI_CHAT_VOICE` | `/voice-ai-chat`, `mp3`, server detects, server default |
+| `app_config.h` | `AI_CHAT_TIMEOUT_MS` | 60 s for one Voice AI turn |
 | `apps/app_home.c` | `HOME_TILE_W`, `HOME_ORB`, `HOME_SIDE_ORB`, `HOME_SIDE_OPA` (carousel tile width, orb size in the middle and beside it, how dim the neighbors are) | 120 px, 104 px, 80 px, 140/255 |
 | `apps/app_translate.c` | `REPLAY_W`, `REPLAY_H`, `REPLAY_EXT_PX` (Replay button size and extra touch margin) | 196 x 66 px, 14 px |
 | `app_config.h` | `DEFAULT_TR_SOURCE`, `DEFAULT_TR_TARGET` | `en`, `es` (first boot) |
@@ -735,6 +798,30 @@ and every reconnect uses it, across reboots, until you choose **New conversation
 chat, or the conversation button on the Voice server screen). Reset settings also starts a new one.
 Whether the server remembers earlier turns after a reconnect depends on the server keying its
 history on `conversationId` rather than on the WebSocket connection.
+
+### Voice AI protocol
+
+One HTTPS request per turn (the Voice AI Chat API, OpenAPI 3.0.1):
+
+```
+POST <base>/voice-ai-chat?format=mp3&conversationId=<uuid>[&language=xx][&voice=...]
+x-api-key: <key>
+Content-Type: multipart/form-data; boundary=----FusionApps<random>
+
+------FusionApps<random>
+Content-Disposition: form-data; name="file"; filename="question.wav"
+Content-Type: audio/wav
+
+RIFF....WAVE....   (16 kHz mono 16-bit)
+------FusionApps<random>--
+```
+
+- **200**: `{"transcript":"...","reply":"...","audioBase64":"...","mimeType":"audio/mpeg",...}`.
+  `transcript` and `reply` are shown (ASCII look-alikes, as in Voice chat), the audio is played. A
+  reply without audio just shows the text.
+- **Errors**: `{"error":{"code":"no_speech","message":"...","stage":"transcribe"}}` with a 4xx/5xx
+  status. `code` and `stage` go to the log; the screen shows a short note (see "Voice AI").
+- Chunked replies and replies with `Content-Length` both work. No redirects are followed.
 
 ### Translator protocol
 
@@ -819,6 +906,13 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app
 | Settings > Status "Wrong password?" (`reason 15`/`202`) | Password | Settings > Password |
 | Home shows "Fusion Apps" instead of the time | NTP hasn't synced yet | Wait for Wi-Fi; the clock appears within seconds |
 | Voice chat: "Set the server URL: swipe up" | URL doesn't start with `wss://` | Swipe up > Server URL |
+| Voice AI: "Set the server URL: swipe up" | URL doesn't start with `https://` | Swipe up > Server URL (the base URL, e.g. `https://host:4443/voice-ai-chat-api`) |
+| Voice AI: "Can't reach the server - check the URL" | Host, port or TLS; `voice:` log says `Can't connect to <host>: ...` | Check the URL; for a host other than `WS_HOST`, see "TLS certificate" |
+| Voice AI: "HTTP 404 - check the server URL" | Wrong base path | The app adds `/voice-ai-chat` to the base URL: set the base, not another endpoint |
+| Voice AI: "Server refused (HTTP 401) - check the API key" | API key (sent as the `x-api-key` header) | Swipe up > API key |
+| Voice AI: "Didn't catch that - try again" | The API found no speech (`no_speech`) | Talk closer to the board, or hold a little longer |
+| Voice AI: "No reply from the server" | The API took longer than `AI_CHAT_TIMEOUT_MS` (60 s), or the reply stalled | Check the API's log; raise `AI_CHAT_TIMEOUT_MS` if it's just slow |
+| Voice AI: Unsupported media type (415) message | The flow doesn't accept multipart, or the file part | The `file` part is `audio/wav`; check the Fusion trigger parses `multipart/form-data` |
 | Settings > Wake word "No model: run idf.py flash"; log `No "jarvis" wake word model` or `Can not find model in partition table` | The model partition wasn't written (`app-flash` skips it) or `CONFIG_SR_WN_WN9_JARVIS_TTS` isn't in `sdkconfig` | `grep JARVIS sdkconfig`; if missing, `rm sdkconfig && idf.py set-target esp32s3`; then `idf.py build flash` |
 | Striped or half-drawn screen, `Draw bitmap failed: ESP_ERR_NO_MEM` | Not enough internal DMA RAM for one draw band | Check the boot log says `12-line draw bands`; try `APP_LVGL_BUF_LINES 8` |
 | `Draw bitmap failed` when Voice chat opens (wake word build) | The internal-RAM settings in `sdkconfig.defaults` aren't in `sdkconfig` yet | `grep IRAM_OPT sdkconfig` should show `# CONFIG_ESP_WIFI_IRAM_OPT is not set`; if not, `rm sdkconfig && idf.py set-target esp32s3` and rebuild |

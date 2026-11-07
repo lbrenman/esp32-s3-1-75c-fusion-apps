@@ -90,6 +90,18 @@ input[type=range] { width: 100%; margin: 12px 0 4px; accent-color: var(--accent)
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 #toast.bad { background: var(--err); }
 .hidden { display: none !important; }
+/* collapsible sections: tap a section's title to open or close it (remembered in this browser) */
+h2.fold { cursor: pointer; user-select: none; -webkit-user-select: none; margin: 8px 0 0; padding: 12px 16px;
+  border-radius: 12px; outline: none; }
+h2.fold:active { background: var(--field); }
+h2.fold:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+h2.fold .name { flex: 1; }
+h2.fold .chev { width: 9px; height: 9px; border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim);
+  transform: rotate(-45deg); transition: transform .15s; margin-right: 4px; }
+h2.fold.open .chev { transform: rotate(45deg); margin-top: -4px; }
+.card.folded { display: none; }
+.foldall { display: flex; justify-content: flex-end; margin: -10px 4px 0; }
+.foldall button { padding: 4px 6px; font-size: 14px; font-weight: 500; background: none; color: var(--accent); }
 </style>
 </head>
 <body>
@@ -107,6 +119,7 @@ input[type=range] { width: 100%; margin: 12px 0 4px; accent-color: var(--accent)
 <main id="app" class="hidden">
   <h1>Fusion Apps</h1>
   <p class="sub" id="statusLine"></p>
+  <div class="foldall"><button id="foldAll" type="button">Expand all</button></div>
 
   <h2><i style="background:var(--voice)"></i>Voice chat</h2>
   <div class="card">
@@ -242,6 +255,56 @@ input[type=range] { width: 100%; margin: 12px 0 4px; accent-color: var(--accent)
 const $ = (id) => document.getElementById(id);
 let state = null;            // last /api/state reply
 const dirty = new Set();     // text fields being edited (not overwritten by polling)
+
+/* ------------------------------------------------------------------ collapsible sections
+ * Each <h2> in the app opens and closes the card under it. Which ones are open is remembered in
+ * this browser (localStorage; if that's unavailable, they just start closed every time). */
+const FOLD_KEY = "fa_open_sections";
+function loadOpen() {
+  try { const v = JSON.parse(localStorage.getItem(FOLD_KEY)); if (Array.isArray(v)) return new Set(v); } catch (e) {}
+  return new Set(["Watch"]);                 // first visit: everything closed except Watch
+}
+function saveOpen(set) { try { localStorage.setItem(FOLD_KEY, JSON.stringify([...set])); } catch (e) {} }
+const openSections = loadOpen();
+const folds = [];
+function setFold(f, open) {
+  f.h.classList.toggle("open", open);
+  f.h.setAttribute("aria-expanded", open ? "true" : "false");
+  f.card.classList.toggle("folded", !open);
+  if (open) openSections.add(f.name); else openSections.delete(f.name);
+}
+function updateFoldAll() {
+  $("foldAll").textContent = folds.every((f) => f.h.classList.contains("open")) ? "Collapse all" : "Expand all";
+}
+for (const h of document.querySelectorAll("#app h2")) {
+  const card = h.nextElementSibling;
+  if (!card || !card.classList.contains("card")) continue;
+  const name = h.textContent.trim();
+  const label = document.createElement("span");
+  label.className = "name";
+  label.textContent = name;
+  for (const n of [...h.childNodes]) if (n.nodeType === Node.TEXT_NODE) n.remove();
+  h.appendChild(label);
+  const chev = document.createElement("span");
+  chev.className = "chev";
+  h.appendChild(chev);
+  h.classList.add("fold");
+  h.setAttribute("role", "button");
+  h.tabIndex = 0;
+  const f = { h, card, name };
+  folds.push(f);
+  setFold(f, openSections.has(name));
+  const toggle = () => { setFold(f, !h.classList.contains("open")); saveOpen(openSections); updateFoldAll(); };
+  h.addEventListener("click", toggle);
+  h.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+}
+$("foldAll").onclick = () => {
+  const open = !folds.every((f) => f.h.classList.contains("open"));
+  for (const f of folds) setFold(f, open);
+  saveOpen(openSections);
+  updateFoldAll();
+};
+updateFoldAll();
 
 /* ------------------------------------------------------------------ helpers */
 let toastTimer;

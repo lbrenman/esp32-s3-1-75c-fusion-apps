@@ -103,7 +103,7 @@
 #define QT_TIMEOUT_MS        15000
 #define QT_REFRESH_MS        (60 * 1000)        /* the open Watchlist or Quote screen refreshes this often */
 #define QT_RETRY_MS          (15 * 1000)        /* after a failed watchlist load */
-#define QT_SEL_MAX           20                 /* symbols you can pick for the watchlist */
+#define QT_SEL_MAX           16                 /* symbols you can pick for the watchlist (one Picked page) */
 #define DEFAULT_QT_SYMBOLS   "AAPL,INTC,TXN"    /* first boot; secrets.h STOCK_API_SYMBOLS overrides */
 #define QT_DEBUG             0                  /* 1 = log the first 300 bytes of every reply (tag "quotes") */
 

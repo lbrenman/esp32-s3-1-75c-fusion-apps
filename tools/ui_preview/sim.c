@@ -624,7 +624,7 @@ int main(int argc, char **argv)
     shot("b2_quotes_quote_from_watchlist");
     swipe(CX(110), MY(250), CX(360), MY(250)); step(400);  /* -> Watchlist */
     swipe(CX(110), MY(250), CX(360), MY(250)); step(400);  /* -> Pick symbols */
-    tap(CX(233 + 107), TY(58));                          /* clear (trash) */
+    tap(CX(233 + 113), TY(60));                          /* clear (trash) */
     shot("b3_quotes_clear_confirm");
     tap_text("Clear");
     shot("b4_quotes_pick_watch_empty");

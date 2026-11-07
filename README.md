@@ -91,9 +91,9 @@ the device.*
 | **Pick symbols** (+ or swipe left in Stocks) | Tabs of preset symbols (**QQQ 1**, **QQQ 2**, **Blue Chip**) and **Other** (watchlist symbols not on a tab, e.g. added from Claude). Tap to add (green) or remove (gray) |
 | **Stock server** (gear in Stocks) | See and change the MCP server URL and API key, connection status, refresh now, reset URL to `secrets.h` |
 | **Quotes** | The REST stocks app. A menu: **Get a quote**, **Watchlist** (shows what you picked) and **Stock API** (with its status) |
-| **Get a quote** (Quotes) | Tabs of symbols (**QQQ 1**, **QQQ 2**, **Blue Chip**). Tap one for its Quote screen; the one you looked at last has a ring |
+| **Get a quote** (Quotes) | Tabs of symbols (**QQQ 1**, **QQQ 2**, **Blue Chip**), 16 big buttons each (4 x 4), and a big back button. Tap one for its Quote screen; the one you looked at last has a ring |
 | **Quote** (Quotes) | A detailed quote from `GET /quote`: price, change, open, previous close and the day's range. Refresh button; refreshes every minute while open |
-| **Pick symbols** (Quotes > Watchlist) | The same tabs plus **Picked**. Tap to select (green) or deselect, up to 20. The trash button clears the list. **Watchlist (N)** shows them |
+| **Pick symbols** (Quotes > Watchlist) | The same tabs plus **Picked**. Tap to select (green) or deselect, up to 16. The trash button clears the list. **Watchlist (N)** shows them |
 | **Watchlist** (Quotes) | Quotes for the picked symbols from one `GET /watchlist`, in the order you picked them. Tap a row for its Quote screen. Refresh button; refreshes every minute while open |
 | **Stock API** (Quotes) | See and change the base URL and API key, status of the last request, the two endpoints, **Test** (asks for one quote), reset URL to `secrets.h` |
 | **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new) and wake word on/off, Voice AI conversation (show / start new), phone settings page (on/off, address, PIN), battery (%, state, voltage), version and free memory, restart, reset |
@@ -184,6 +184,11 @@ as before on the watch; the page is a second way to change the same settings.
    address (`fusion-apps.local`), the **PIN** (6 digits) and the IP address.
 2. On the phone, on the same Wi-Fi: open `http://fusion-apps.local` (or `http://<IP address>`).
 3. Enter the PIN. The browser stays signed in until the watch restarts or you make a new PIN.
+
+Each section (Voice chat, Voice AI, Translator, Stocks, Quotes, Display and sound, Watch) opens and
+closes when you tap its title; **Expand all** / **Collapse all** sits under the status line. The
+first time, only Watch is open; after that the page remembers which sections you left open (in that
+browser's local storage, so each phone keeps its own).
 
 | On the page | What it changes |
 | --- | --- |
@@ -862,10 +867,11 @@ make                      # first run clones cJSON; prints "N checks, 0 failed"
 | `app_config.h` | `MCP_DEBUG` | 0; 1 logs the first 300 bytes of each MCP reply |
 | `apps/app_stocks.c` | `GROUPS` (Pick tabs, up to 25 symbols each) | QQQ 1, QQQ 2, Blue Chip |
 | `app_config.h` | `QT_PATH_QUOTE`, `QT_PATH_WATCHLIST`, `QT_KEY_HEADER`, `QT_TIMEOUT_MS` | `/quote`, `/watchlist`, `x-api-key`, 15 s |
-| `app_config.h` | `QT_REFRESH_MS`, `QT_RETRY_MS`, `QT_SEL_MAX` | 60 s, 15 s, 20 symbols |
+| `app_config.h` | `QT_REFRESH_MS`, `QT_RETRY_MS`, `QT_SEL_MAX` | 60 s, 15 s, 16 symbols |
 | `app_config.h` | `DEFAULT_QT_SYMBOLS` | `AAPL,INTC,TXN` (first boot; `STOCK_API_SYMBOLS` in `secrets.h` wins) |
 | `app_config.h` | `QT_DEBUG` | 0; 1 logs the first 300 bytes of each Stock API reply |
-| `apps/app_quotes.c` | `GROUPS` (tabs, up to 25 symbols each) | QQQ 1, QQQ 2, Blue Chip |
+| `apps/app_quotes.c` | `GROUPS` (tabs, up to 16 symbols each) | QQQ 1, QQQ 2, Blue Chip |
+| `apps/app_quotes.c` | `SYM_W`, `SYM_H`, `HDR_BTN` (symbol and back button sizes, 1.75C / 2.06) | 72 x 50 / 86 x 58 px, 52 / 56 px |
 | `app_config.h` | `DEFAULT_WEB_SETTINGS`, `WEB_HOSTNAME` | on (first boot), `fusion-apps` (-> `fusion-apps.local`) |
 | `app_config.h` | `WEB_PIN_MAX_TRIES`, `WEB_PIN_LOCK_S`, `WEB_MAX_SESSIONS` | 5, 60 s, 4 |
 | `ui/ui_theme.c` | palette colors | |

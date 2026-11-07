@@ -1,4 +1,5 @@
-# Host tests for the Stocks app's reply parsing and the MCP client's SSE/JSON-RPC handling.
+# Host tests for the Stocks app's reply parsing, the MCP client's SSE/JSON-RPC handling, and the
+# Quotes app's Stock API helpers.
 #
 #   cd tools/stocks_test
 #   make          # first run clones cJSON (the same library ESP-IDF uses), then runs the tests
@@ -14,7 +15,7 @@ test: stocks_test
 $(CJSON):
 	git clone --depth 1 https://github.com/DaveGamble/cJSON.git $(CJSON)
 
-stocks_test: test.c $(MAIN)/apps/stocks_parse.c $(MAIN)/apps/stocks_parse.h $(MAIN)/mcp_client.c $(MAIN)/mcp_client.h | $(CJSON)
+stocks_test: test.c $(MAIN)/apps/stocks_parse.c $(MAIN)/apps/stocks_parse.h $(MAIN)/mcp_client.c $(MAIN)/mcp_client.h $(MAIN)/apps/quotes.h | $(CJSON)
 	$(CC) $(CFLAGS) -o $@ test.c $(MAIN)/apps/stocks_parse.c $(MAIN)/mcp_client.c $(CJSON)/cJSON.c -lm
 
 clean:

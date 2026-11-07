@@ -91,6 +91,22 @@
 #define DEFAULT_STOCKS_AUTO  1             /* auto refresh on at first boot */
 #define MCP_DEBUG            0             /* 1 = log the first 300 bytes of every MCP reply (tag "mcp") */
 
+/* Quotes app: a second stocks app, for the Stock API (plain REST over HTTPS, not MCP).
+ *   GET <base>/quote?symbol=AAPL             -> {"Quote":{"Symbol":..,"Price":..,"DayHigh":..}}
+ *   GET <base>/watchlist?symbols=INTC,TXN    -> {"Watchlist":[{"Symbol":..,"Price":..}, ...]}
+ * with the API key in the x-api-key header. HTTP 204 means "Symbol(s) not found".
+ * The base URL and API key are in secrets.h (first boot) and on the device (Quotes > Stock API).
+ * Which symbols the watchlist shows is picked on the device and saved; it's not kept on the server. */
+#define QT_PATH_QUOTE        "/quote"           /* added to the base URL */
+#define QT_PATH_WATCHLIST    "/watchlist"
+#define QT_KEY_HEADER        "x-api-key"        /* HTTP header that carries the API key */
+#define QT_TIMEOUT_MS        15000
+#define QT_REFRESH_MS        (60 * 1000)        /* the open Watchlist or Quote screen refreshes this often */
+#define QT_RETRY_MS          (15 * 1000)        /* after a failed watchlist load */
+#define QT_SEL_MAX           20                 /* symbols you can pick for the watchlist */
+#define DEFAULT_QT_SYMBOLS   "AAPL,INTC,TXN"    /* first boot; secrets.h STOCK_API_SYMBOLS overrides */
+#define QT_DEBUG             0                  /* 1 = log the first 300 bytes of every reply (tag "quotes") */
+
 /* Translator app: push-to-talk client for the Amplify Fusion voice translator (WebSocket).
  * The server base URL and API key are in secrets.h (first boot) and on the device (swipe up);
  * the app connects to <base>/translate?sourceLanguage=..&targetLanguage=..&x-api-key=..

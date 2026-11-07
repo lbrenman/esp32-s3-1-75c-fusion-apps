@@ -15,7 +15,7 @@
 :root {
   --bg: #f2f2f7; --card: #fff; --text: #1c1c1e; --dim: #6e6e73; --line: #d8d8dc;
   --accent: #2f8cff; --ok: #30c26a; --warn: #ff9f0a; --err: #ff453a; --field: #f2f2f7;
-  --voice: #7c5cff; --ai: #ff8a3d; --tr: #14b8c8; --stocks: #30c26a; --sys: #8e9aaf;
+  --voice: #7c5cff; --ai: #ff8a3d; --tr: #14b8c8; --stocks: #30c26a; --quotes: #2f8cff; --sys: #8e9aaf;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #000; --card: #1c1c1e; --text: #f2f2f7; --dim: #98989f; --line: #38383a; --field: #2c2c2e; }
@@ -191,6 +191,21 @@ input[type=range] { width: 100%; margin: 12px 0 4px; accent-color: var(--accent)
     </div>
   </div>
 
+  <h2><i style="background:var(--quotes)"></i>Quotes</h2>
+  <div class="card">
+    <div class="row">
+      <div class="line"><span class="label">Stock API base URL</span></div>
+      <input type="url" id="qt_url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://host:4443/stock2api">
+      <div class="hint">The watch calls &lt;base&gt;/quote and &lt;base&gt;/watchlist.</div>
+      <div class="btns"><button data-save="qt_url" disabled>Save</button><button class="plain" data-default="qt_url">Use secrets.h URL</button></div>
+    </div>
+    <div class="row">
+      <div class="line"><span class="label">API key</span><span class="val" id="qt_key_info"></span></div>
+      <input type="password" id="qt_key" autocomplete="off" placeholder="New API key">
+      <div class="btns"><button data-save="qt_key" disabled>Save</button></div>
+    </div>
+  </div>
+
   <h2><i style="background:var(--sys)"></i>Display and sound</h2>
   <div class="card">
     <div class="row">
@@ -318,7 +333,7 @@ function render() {
   $("statusLine").textContent = parts.join(" · ") || "Connected to the watch";
 
   // text fields: only when the user isn't editing them
-  for (const id of ["ws_url", "ai_url", "tr_url", "mcp_url"]) {
+  for (const id of ["ws_url", "ai_url", "tr_url", "mcp_url", "qt_url"]) {
     if (!dirty.has(id)) $(id).value = s[id];
     const d = state.defaults[id];
     document.querySelector('[data-default="' + id + '"]').classList.toggle("hidden", !d || d === s[id]);
@@ -327,6 +342,7 @@ function render() {
   $("ai_key_info").textContent = keyInfo(s.ai_key_set, s.ai_key_tail);
   $("tr_key_info").textContent = keyInfo(s.tr_key_set, s.tr_key_tail);
   $("mcp_key_info").textContent = keyInfo(s.mcp_key_set, s.mcp_key_tail);
+  $("qt_key_info").textContent = keyInfo(s.qt_key_set, s.qt_key_tail);
 
   $("wake_word").checked = s.wake_word;
   $("wakeHint").textContent = {
@@ -370,8 +386,8 @@ async function load() {
 }
 
 /* ------------------------------------------------------------------ wiring */
-const keyFields = { ws_key: "ws_key", ai_key: "ai_key", tr_key: "tr_key", mcp_key: "mcp_key" };
-const httpUrls = { mcp_url: true, ai_url: true };   // the others are wss://
+const keyFields = { ws_key: "ws_key", ai_key: "ai_key", tr_key: "tr_key", mcp_key: "mcp_key", qt_key: "qt_key" };
+const httpUrls = { mcp_url: true, ai_url: true, qt_url: true };   // the others are wss://
 for (const btn of document.querySelectorAll("[data-save]")) {
   const id = btn.dataset.save, input = $(id);
   input.addEventListener("input", () => {

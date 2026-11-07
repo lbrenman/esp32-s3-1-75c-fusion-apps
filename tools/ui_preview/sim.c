@@ -11,6 +11,7 @@
 #include "voice.h"
 #include "net.h"
 #include "stocks.h"
+#include "quotes.h"
 #include "power.h"
 
 #include "board.h"
@@ -43,6 +44,10 @@ void stocks_fake_load(int n);
 void stocks_fake_finish(void);
 void stocks_bump(void);
 void stocks_fake_detail(bool ok);
+extern qt_snapshot_t g_qs;
+void quotes_fake_watchlist(void);
+void quotes_fake_quote(bool ok);
+void quotes_bump(void);
 
 static uint16_t fb[W * H];
 static uint8_t  drawbuf[W * H * 2];
@@ -177,10 +182,12 @@ int main(int argc, char **argv)
     shot("01b2_home_swiped_translator");
     swipe(CX(320), MY(250), CX(160), MY(250)); step(600);
     swipe(CX(320), MY(250), CX(160), MY(250)); step(600);
+    shot("01b3_home_swiped_quotes");
+    swipe(CX(320), MY(250), CX(160), MY(250)); step(600);
     shot("01c_home_swiped_settings");
     swipe(CX(320), MY(250), CX(160), MY(250)); step(600);  /* past the last: stays on Settings */
     shot("01d_home_last");
-    for (int i = 0; i < 4; i++) { swipe(CX(160), MY(250), CX(320), MY(250)); step(600); }
+    for (int i = 0; i < 5; i++) { swipe(CX(160), MY(250), CX(320), MY(250)); step(600); }
 
     tap_app("Voice chat");
     printf("voice active=%d\n", g_vactive);
@@ -573,5 +580,72 @@ int main(int argc, char **argv)
     tap_app("Settings");
     swipe(CX(233), MY(400), CX(233), MY(60)); swipe(CX(233), MY(400), CX(233), MY(60)); swipe(CX(233), MY(400), CX(233), MY(60));
     step(1200); shot("64_settings_system");
+    tap_text(ICON_LEFT);
+    step(400);
+
+    /* ---- Quotes (Stock API, REST): menu, Get a quote, Pick symbols, Watchlist, Stock API */
+    g_power.charging = false; g_power.usb = false; g_power.percent = 87;
+    tap_app("Quotes");
+    shot("a0_quotes_menu");
+    tap_text("Get a quote");
+    shot("a1_quotes_pick_quote");
+    tap_text("NVDA");
+    shot("a2_quotes_quote_loading");
+    quotes_fake_quote(true);
+    shot("a3_quotes_quote");
+    swipe(CX(110), MY(250), CX(360), MY(250));           /* swipe right -> back to the symbols */
+    step(400);
+    shot("a4_quotes_pick_quote_last");
+    tap_text("Blue Chip");
+    tap_text("T");
+    quotes_fake_quote(false);
+    shot("a5_quotes_quote_not_found");
+    swipe(CX(110), MY(250), CX(360), MY(250)); step(400);
+    swipe(CX(110), MY(250), CX(360), MY(250)); step(400);  /* -> menu */
+    tap_text("Watchlist");
+    shot("a6_quotes_pick_watch");
+    tap_text("QQQ 1");
+    tap_text("NVDA");                                    /* select */
+    tap_text("AMD");
+    tap_text("INTC");                                    /* already picked: deselect */
+    shot("a7_quotes_pick_watch_changed");
+    tap_text("Picked");
+    shot("a8_quotes_pick_watch_picked");
+    tap_text("Watchlist (4)");
+    shot("a9_quotes_watchlist_loading");
+    quotes_fake_watchlist();
+    shot("b0_quotes_watchlist");
+    g_qs.wl_state = QT_ERROR; strcpy(g_qs.wl_note, "HTTP 401 - check the API key"); g_qs.wl_us = g_sim_us - 125000000LL;
+    quotes_bump();
+    shot("b1_quotes_watchlist_error_with_data");
+    g_qs.wl_state = QT_OK; g_qs.wl_us = g_sim_us; quotes_bump();
+    tap_text("AMD");                                     /* a row -> Quote */
+    quotes_fake_quote(true);
+    shot("b2_quotes_quote_from_watchlist");
+    swipe(CX(110), MY(250), CX(360), MY(250)); step(400);  /* -> Watchlist */
+    swipe(CX(110), MY(250), CX(360), MY(250)); step(400);  /* -> Pick symbols */
+    tap(CX(233 + 107), TY(58));                          /* clear (trash) */
+    shot("b3_quotes_clear_confirm");
+    tap_text("Clear");
+    shot("b4_quotes_pick_watch_empty");
+    swipe(CX(110), MY(250), CX(360), MY(250)); step(400);  /* -> menu */
+    shot("b5_quotes_menu_after");
+    tap_text("Stock API");
+    shot("b6_quotes_stock_api");
+    tap_text("API key");
+    shot("b7_quotes_api_key_editor");
+    tap(CX(233 - 130), TY(52));
+    step(400);
+    g_qs.link = QT_LINK_NOT_SET; quotes_bump(); step(400);
+    shot("b8_quotes_stock_api_not_set");
+    g_qs.link = QT_LINK_READY; quotes_bump();
+    swipe(CX(110), MY(250), CX(360), MY(250)); step(400);
+    ui_theme_set_dark(false); ui_nav_refresh(); step(300);
+    tap_text("Get a quote");
+    tap_text("QQQ 1");
+    shot("b9_quotes_pick_quote_light");
+    tap_text("AAPL");
+    quotes_fake_quote(true);
+    shot("c0_quotes_quote_light");
     return 0;
 }

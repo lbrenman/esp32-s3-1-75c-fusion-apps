@@ -20,7 +20,7 @@ SIM      := sim_$(BOARD)
 UI_SRCS  := $(MAIN)/ui/ui_theme.c $(MAIN)/ui/ui_nav.c $(MAIN)/ui/ui_widgets.c \
             $(wildcard $(MAIN)/ui/ui_icons_*.c) \
             $(MAIN)/apps/apps.c $(MAIN)/apps/app_home.c $(MAIN)/apps/app_settings.c $(MAIN)/apps/app_voice.c \
-            $(MAIN)/apps/app_stocks.c $(MAIN)/apps/app_translate.c $(MAIN)/apps/translate_langs.c \
+            $(MAIN)/apps/app_stocks.c $(MAIN)/apps/app_quotes.c $(MAIN)/apps/app_translate.c $(MAIN)/apps/translate_langs.c \
             $(wildcard $(MAIN)/ui/ui_font_*.c) $(MAIN)/text_ascii.c
 
 .PHONY: all shots clean

@@ -40,6 +40,13 @@
 #ifndef AI_CHAT_API_KEY
 #define AI_CHAT_API_KEY WS_API_KEY
 #endif
+/* Quotes app (added later). Without these, it uses the voice server's host and API key. */
+#ifndef STOCK_API_KEY
+#define STOCK_API_KEY WS_API_KEY
+#endif
+#ifndef STOCK_API_SYMBOLS
+#define STOCK_API_SYMBOLS DEFAULT_QT_SYMBOLS
+#endif
 #define XSTR(x) STR(x)
 #define STR(x)  #x
 
@@ -56,6 +63,12 @@ static const char s_default_ai_url[] = AI_CHAT_URL;
 static const char s_default_ai_url[] = "https://" WS_HOST ":" XSTR(WS_PORT) "/voice-ai-chat-api";
 #endif
 
+#ifdef STOCK_API_URL
+static const char s_default_qt_url[] = STOCK_API_URL;
+#else
+static const char s_default_qt_url[] = "https://" WS_HOST ":" XSTR(WS_PORT) "/stock2api";
+#endif
+
 static app_settings_t    s_cur;
 static SemaphoreHandle_t s_mtx;
 
@@ -64,6 +77,7 @@ const char *settings_build_host(void)  { return WS_HOST; }
 const char *settings_default_mcp_url(void) { return STOCKS_MCP_URL; }
 const char *settings_default_tr_url(void) { return s_default_tr_url; }
 const char *settings_default_ai_url(void) { return s_default_ai_url; }
+const char *settings_default_qt_url(void) { return s_default_qt_url; }
 
 static void make_uuid(char *out /* SET_CONV_LEN + 1 bytes */)
 {
@@ -113,6 +127,9 @@ static void load_defaults(app_settings_t *s)
     s->web_enabled = DEFAULT_WEB_SETTINGS;
     strlcpy(s->ai_url, s_default_ai_url, sizeof(s->ai_url));
     strlcpy(s->ai_api_key, AI_CHAT_API_KEY, sizeof(s->ai_api_key));
+    strlcpy(s->qt_url, s_default_qt_url, sizeof(s->qt_url));
+    strlcpy(s->qt_api_key, STOCK_API_KEY, sizeof(s->qt_api_key));
+    strlcpy(s->qt_syms, STOCK_API_SYMBOLS, sizeof(s->qt_syms));
     /* ai_conversation_id stays empty: settings_init() makes one */
     /* web_pin stays empty: settings_init() makes one */
 }
@@ -170,6 +187,9 @@ void settings_init(void)
         get_str(h, "aiurl",  s_cur.ai_url,     sizeof(s_cur.ai_url));
         get_str(h, "aikey",  s_cur.ai_api_key, sizeof(s_cur.ai_api_key));
         get_str(h, "aiconv", s_cur.ai_conversation_id, sizeof(s_cur.ai_conversation_id));
+        get_str(h, "qturl",  s_cur.qt_url,     sizeof(s_cur.qt_url));
+        get_str(h, "qtkey",  s_cur.qt_api_key, sizeof(s_cur.qt_api_key));
+        get_str(h, "qtsyms", s_cur.qt_syms,    sizeof(s_cur.qt_syms));
         s_cur.dark_mode = dark != 0;
         s_cur.stocks_auto = stk_auto != 0;
         s_cur.wake_word = wake != 0;
@@ -294,6 +314,9 @@ esp_err_t settings_set(const app_settings_t *in)
     if (strcmp(old.ai_url, in->ai_url))         err |= nvs_set_str(h, "aiurl", in->ai_url);
     if (strcmp(old.ai_api_key, in->ai_api_key)) err |= nvs_set_str(h, "aikey", in->ai_api_key);
     if (strcmp(old.ai_conversation_id, in->ai_conversation_id)) err |= nvs_set_str(h, "aiconv", in->ai_conversation_id);
+    if (strcmp(old.qt_url, in->qt_url))         err |= nvs_set_str(h, "qturl", in->qt_url);
+    if (strcmp(old.qt_api_key, in->qt_api_key)) err |= nvs_set_str(h, "qtkey", in->qt_api_key);
+    if (strcmp(old.qt_syms, in->qt_syms))       err |= nvs_set_str(h, "qtsyms", in->qt_syms);
     err |= nvs_commit(h);
     nvs_close(h);
 

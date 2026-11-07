@@ -5,11 +5,12 @@
  *   Home screen ─┬─ Voice chat  (push-to-talk client for the Amplify Fusion voice server)
  *                ├─ Translator  (push-to-talk voice translator, same engine as Voice chat)
  *                ├─ Stocks      (watchlist client for the FusionStockWatchListMCP server)
+ *                ├─ Quotes      (quotes and a watchlist from the Stock API, plain REST)
  *                └─ Settings    (Wi-Fi, dark mode, brightness, volume, phone page, reset)
  *
  * Phone settings page: http://fusion-apps.local on the same Wi-Fi (web_settings.c), PIN in Settings.
  *
- * Boot order: settings (NVS) -> display -> battery -> UI -> audio -> stocks engine -> Wi-Fi -> phone page.
+ * Boot order: settings (NVS) -> display -> battery -> UI -> audio -> stocks + quotes engines -> Wi-Fi -> phone page.
  * Apps live in main/apps/, shared UI pieces in main/ui/.
  */
 
@@ -26,6 +27,7 @@
 #include "net.h"
 #include "voice.h"
 #include "stocks.h"
+#include "quotes.h"
 #include "power.h"
 #include "web_settings.h"
 #include "apps.h"
@@ -62,6 +64,7 @@ void app_main(void)
     }
     voice_set_volume(cfg.volume);
     stocks_init();
+    quotes_init();
 
     net_start();
     web_settings_start();             /* phone settings page, if switched on (Settings > Phone) */

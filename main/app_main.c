@@ -51,7 +51,6 @@ void app_main(void)
         ESP_LOGE(TAG, "Display init failed");
         return;
     }
-    bsp_display_brightness_set(cfg.brightness);
     power_init();                     /* battery level (AXP2101 on the I2C bus the display started) */
 
     /* Take the LVGL lock to build the first screen. If the LVGL task is stuck (a display transfer
@@ -65,6 +64,11 @@ void app_main(void)
                  (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
                  (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) / 1024));
     }
+    /* Brightness is a command to the panel over the same SPI bus as the frames. Sent from here while
+     * the LVGL task flushes its first frame, it collides with it on the 1.75C ("Cannot acquire bus
+     * when a polling transaction is in progress", then "Draw bitmap failed") and the screen can
+     * freeze half drawn. With the lock held, LVGL isn't drawing. */
+    bsp_display_brightness_set(cfg.brightness);
     ui_theme_init(disp, cfg.dark_mode);
     ui_nav_init(home_build);
     bsp_display_unlock();

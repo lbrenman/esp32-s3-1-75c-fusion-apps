@@ -1,5 +1,6 @@
 /* Host tests for the Stocks app's reply parsing (main/apps/stocks_parse.c) and the MCP client's
- * reply handling (main/mcp_client.c, network code left out). Uses the replies
+ * reply handling (main/mcp_client.c, network code left out), and the Quotes app's Stock API helpers
+ * (main/apps/quotes.h) with the example replies from the Stock API's OpenAPI spec. Uses the replies
  * FusionStockWatchListMCP actually sends, plus the other shapes the parsers accept.
  *
  *   cd tools/stocks_test && make
@@ -11,6 +12,7 @@
 #include "cJSON.h"
 #include "stocks_parse.h"
 #include "mcp_client.h"
+#include "quotes.h"
 
 static int fails = 0, checks = 0;
 #define CHECK(cond, ...) do { checks++; if (!(cond)) { fails++; printf("FAIL %s:%d: ", __FILE__, __LINE__); \
@@ -155,8 +157,53 @@ static void mcp(void)
     CHECK(mcp_find_reply("", 1) == NULL && mcp_find_reply("garbage", 1) == NULL, "junk");
 }
 
+/* Quotes app: the Stock API (REST) replies, from its OpenAPI spec, and the URL / symbol helpers */
+static void rest_api(void)
+{
+    char out[QT_ENDPOINT_MAX];
+    quotes_endpoint("https://h:4443/stock2api", QT_PATH_QUOTE, out, sizeof(out));
+    CHECK(!strcmp(out, "https://h:4443/stock2api/quote"), "endpoint: %s", out);
+    quotes_endpoint("https://h:4443/stock2api/", QT_PATH_WATCHLIST, out, sizeof(out));
+    CHECK(!strcmp(out, "https://h:4443/stock2api/watchlist"), "trailing slash: %s", out);
+    quotes_endpoint("https://h:4443/stock2api/quote?symbol=AAPL", QT_PATH_WATCHLIST, out, sizeof(out));
+    CHECK(!strcmp(out, "https://h:4443/stock2api/watchlist"), "pasted /quote URL: %s", out);
+    quotes_endpoint("https://h:9443/watchlist", QT_PATH_QUOTE, out, sizeof(out));
+    CHECK(!strcmp(out, "https://h:9443/quote"), "pasted /watchlist at the root: %s", out);
+    quotes_endpoint("https://h:9443", QT_PATH_QUOTE, out, sizeof(out));
+    CHECK(!strcmp(out, "https://h:9443/quote"), "root base: %s", out);
+
+    stocks_sym_t s[QT_SEL_MAX];
+    int n = quotes_split_symbols("AAPL,intc, TXN,,aapl,BRK.B,9BAD,TOOLONGSYM,T", s, QT_SEL_MAX);
+    CHECK(n == 5, "split count %d", n);
+    CHECK(n == 5 && !strcmp(s[0], "AAPL") && !strcmp(s[1], "INTC") && !strcmp(s[2], "TXN") &&
+          !strcmp(s[3], "BRK.B") && !strcmp(s[4], "T"), "split values");
+    CHECK(quotes_split_symbols("", s, QT_SEL_MAX) == 0, "split empty");
+    CHECK(quotes_split_symbols("A,B,C,D", s, 2) == 2, "split max");
+
+    /* GET /quote?symbol=AAPL (spec example "AAPL") */
+    const char *quote = "{\"Quote\":{\"Price\":210.62,\"Change\":-3.48,\"ChangePercent\":-1.6254,\"DayHigh\":216.07,"
+                        "\"DayLow\":210.3,\"OpenPrice\":215.805,\"PreviousClose\":214.1,\"Symbol\":\"AAPL\",\"Name\":\"Apple Inc\"}}";
+    stocks_detail_t d;
+    char err[96];
+    CHECK(stocks_parse_detail(quote, "AAPL", &d, err, sizeof(err)), "spec quote: %s", err);
+    CHECK(fabs(d.q.price - 210.62) < 1e-9 && d.q.change < 0 && d.has_high && d.has_low && d.has_open &&
+          d.has_prev_close && fabs(d.open - 215.805) < 1e-9 && !strcmp(d.q.name, "Apple Inc"), "spec quote fields");
+
+    /* GET /watchlist?symbols=TXN,INTC (spec example: no Volume, although the schema has it) */
+    const char *wl = "{\"Watchlist\":[{\"Price\":198.47,\"Change\":0.17,\"ChangePercent\":0.0857,\"Symbol\":\"TXN\","
+                     "\"Name\":\"Texas Instruments Inc\"},{\"Price\":22.77,\"Change\":0.33,\"ChangePercent\":1.4706,"
+                     "\"Symbol\":\"INTC\",\"Name\":\"Intel Corp\",\"Volume\":51234567}]}";
+    stocks_quote_t q[QT_SEL_MAX * 2];
+    CHECK(stocks_parse_quotes(wl, q, QT_SEL_MAX * 2, &n, err, sizeof(err)), "spec watchlist: %s", err);
+    CHECK(n == 2 && !strcmp(q[0].sym, "TXN") && !strcmp(q[1].sym, "INTC") && q[1].has_pct, "spec watchlist rows");
+
+    /* 400 / 500 bodies are {"message":...}: not quotes */
+    CHECK(!stocks_parse_detail("{\"message\":\"Missing symbol\"}", "AAPL", &d, err, sizeof(err)), "400 body is not a quote");
+}
+
 int main(void)
 {
+    rest_api();
     quotes();
     symbols();
     classify();

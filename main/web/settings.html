@@ -15,7 +15,7 @@
 :root {
   --bg: #f2f2f7; --card: #fff; --text: #1c1c1e; --dim: #6e6e73; --line: #d8d8dc;
   --accent: #2f8cff; --ok: #30c26a; --warn: #ff9f0a; --err: #ff453a; --field: #f2f2f7;
-  --voice: #7c5cff; --ai: #ff8a3d; --tr: #14b8c8; --stocks: #30c26a; --sys: #8e9aaf;
+  --voice: #7c5cff; --ai: #ff8a3d; --tr: #14b8c8; --stocks: #30c26a; --quotes: #2f8cff; --sys: #8e9aaf;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #000; --card: #1c1c1e; --text: #f2f2f7; --dim: #98989f; --line: #38383a; --field: #2c2c2e; }
@@ -90,6 +90,18 @@ input[type=range] { width: 100%; margin: 12px 0 4px; accent-color: var(--accent)
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 #toast.bad { background: var(--err); }
 .hidden { display: none !important; }
+/* collapsible sections: tap a section's title to open or close it (remembered in this browser) */
+h2.fold { cursor: pointer; user-select: none; -webkit-user-select: none; margin: 8px 0 0; padding: 12px 16px;
+  border-radius: 12px; outline: none; }
+h2.fold:active { background: var(--field); }
+h2.fold:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+h2.fold .name { flex: 1; }
+h2.fold .chev { width: 9px; height: 9px; border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim);
+  transform: rotate(-45deg); transition: transform .15s; margin-right: 4px; }
+h2.fold.open .chev { transform: rotate(45deg); margin-top: -4px; }
+.card.folded { display: none; }
+.foldall { display: flex; justify-content: flex-end; margin: -10px 4px 0; }
+.foldall button { padding: 4px 6px; font-size: 14px; font-weight: 500; background: none; color: var(--accent); }
 </style>
 </head>
 <body>
@@ -107,6 +119,7 @@ input[type=range] { width: 100%; margin: 12px 0 4px; accent-color: var(--accent)
 <main id="app" class="hidden">
   <h1>Fusion Apps</h1>
   <p class="sub" id="statusLine"></p>
+  <div class="foldall"><button id="foldAll" type="button">Expand all</button></div>
 
   <h2><i style="background:var(--voice)"></i>Voice chat</h2>
   <div class="card">
@@ -191,6 +204,21 @@ input[type=range] { width: 100%; margin: 12px 0 4px; accent-color: var(--accent)
     </div>
   </div>
 
+  <h2><i style="background:var(--quotes)"></i>Quotes</h2>
+  <div class="card">
+    <div class="row">
+      <div class="line"><span class="label">Stock API base URL</span></div>
+      <input type="url" id="qt_url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://host:4443/stock2api">
+      <div class="hint">The watch calls &lt;base&gt;/quote and &lt;base&gt;/watchlist.</div>
+      <div class="btns"><button data-save="qt_url" disabled>Save</button><button class="plain" data-default="qt_url">Use secrets.h URL</button></div>
+    </div>
+    <div class="row">
+      <div class="line"><span class="label">API key</span><span class="val" id="qt_key_info"></span></div>
+      <input type="password" id="qt_key" autocomplete="off" placeholder="New API key">
+      <div class="btns"><button data-save="qt_key" disabled>Save</button></div>
+    </div>
+  </div>
+
   <h2><i style="background:var(--sys)"></i>Display and sound</h2>
   <div class="card">
     <div class="row">
@@ -227,6 +255,56 @@ input[type=range] { width: 100%; margin: 12px 0 4px; accent-color: var(--accent)
 const $ = (id) => document.getElementById(id);
 let state = null;            // last /api/state reply
 const dirty = new Set();     // text fields being edited (not overwritten by polling)
+
+/* ------------------------------------------------------------------ collapsible sections
+ * Each <h2> in the app opens and closes the card under it. Which ones are open is remembered in
+ * this browser (localStorage; if that's unavailable, they just start closed every time). */
+const FOLD_KEY = "fa_open_sections";
+function loadOpen() {
+  try { const v = JSON.parse(localStorage.getItem(FOLD_KEY)); if (Array.isArray(v)) return new Set(v); } catch (e) {}
+  return new Set(["Watch"]);                 // first visit: everything closed except Watch
+}
+function saveOpen(set) { try { localStorage.setItem(FOLD_KEY, JSON.stringify([...set])); } catch (e) {} }
+const openSections = loadOpen();
+const folds = [];
+function setFold(f, open) {
+  f.h.classList.toggle("open", open);
+  f.h.setAttribute("aria-expanded", open ? "true" : "false");
+  f.card.classList.toggle("folded", !open);
+  if (open) openSections.add(f.name); else openSections.delete(f.name);
+}
+function updateFoldAll() {
+  $("foldAll").textContent = folds.every((f) => f.h.classList.contains("open")) ? "Collapse all" : "Expand all";
+}
+for (const h of document.querySelectorAll("#app h2")) {
+  const card = h.nextElementSibling;
+  if (!card || !card.classList.contains("card")) continue;
+  const name = h.textContent.trim();
+  const label = document.createElement("span");
+  label.className = "name";
+  label.textContent = name;
+  for (const n of [...h.childNodes]) if (n.nodeType === Node.TEXT_NODE) n.remove();
+  h.appendChild(label);
+  const chev = document.createElement("span");
+  chev.className = "chev";
+  h.appendChild(chev);
+  h.classList.add("fold");
+  h.setAttribute("role", "button");
+  h.tabIndex = 0;
+  const f = { h, card, name };
+  folds.push(f);
+  setFold(f, openSections.has(name));
+  const toggle = () => { setFold(f, !h.classList.contains("open")); saveOpen(openSections); updateFoldAll(); };
+  h.addEventListener("click", toggle);
+  h.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+}
+$("foldAll").onclick = () => {
+  const open = !folds.every((f) => f.h.classList.contains("open"));
+  for (const f of folds) setFold(f, open);
+  saveOpen(openSections);
+  updateFoldAll();
+};
+updateFoldAll();
 
 /* ------------------------------------------------------------------ helpers */
 let toastTimer;
@@ -318,7 +396,7 @@ function render() {
   $("statusLine").textContent = parts.join(" · ") || "Connected to the watch";
 
   // text fields: only when the user isn't editing them
-  for (const id of ["ws_url", "ai_url", "tr_url", "mcp_url"]) {
+  for (const id of ["ws_url", "ai_url", "tr_url", "mcp_url", "qt_url"]) {
     if (!dirty.has(id)) $(id).value = s[id];
     const d = state.defaults[id];
     document.querySelector('[data-default="' + id + '"]').classList.toggle("hidden", !d || d === s[id]);
@@ -327,6 +405,7 @@ function render() {
   $("ai_key_info").textContent = keyInfo(s.ai_key_set, s.ai_key_tail);
   $("tr_key_info").textContent = keyInfo(s.tr_key_set, s.tr_key_tail);
   $("mcp_key_info").textContent = keyInfo(s.mcp_key_set, s.mcp_key_tail);
+  $("qt_key_info").textContent = keyInfo(s.qt_key_set, s.qt_key_tail);
 
   $("wake_word").checked = s.wake_word;
   $("wakeHint").textContent = {
@@ -370,8 +449,8 @@ async function load() {
 }
 
 /* ------------------------------------------------------------------ wiring */
-const keyFields = { ws_key: "ws_key", ai_key: "ai_key", tr_key: "tr_key", mcp_key: "mcp_key" };
-const httpUrls = { mcp_url: true, ai_url: true };   // the others are wss://
+const keyFields = { ws_key: "ws_key", ai_key: "ai_key", tr_key: "tr_key", mcp_key: "mcp_key", qt_key: "qt_key" };
+const httpUrls = { mcp_url: true, ai_url: true, qt_url: true };   // the others are wss://
 for (const btn of document.querySelectorAll("[data-save]")) {
   const id = btn.dataset.save, input = $(id);
   input.addEventListener("input", () => {

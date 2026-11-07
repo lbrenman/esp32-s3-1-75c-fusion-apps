@@ -14,6 +14,7 @@
 #define SET_CONV_LEN  36            /* UUID, e.g. 3f2a9c1e-....-c11e */
 #define SET_LANG_MAX  7             /* ISO 639-1 code, e.g. "en" (room for "pt-BR") */
 #define SET_PIN_LEN   6             /* phone settings page PIN, 6 digits */
+#define SET_QT_SYMS_MAX 200         /* Quotes: the picked watchlist symbols, "AAPL,INTC,TXN" */
 
 typedef struct {
     char    wifi_ssid[SET_SSID_MAX + 1];
@@ -37,6 +38,9 @@ typedef struct {
     char    ai_url[SET_URL_MAX + 1];      /* Voice AI: base URL, https://host:port/voice-ai-chat-api (the app adds /voice-ai-chat) */
     char    ai_api_key[SET_KEY_MAX + 1];
     char    ai_conversation_id[SET_CONV_LEN + 1];  /* Voice AI's own conversation; kept until "New conversation" */
+    char    qt_url[SET_URL_MAX + 1];      /* Quotes: Stock API base URL, https://host:port/stock2api (the app adds /quote, /watchlist) */
+    char    qt_api_key[SET_KEY_MAX + 1];
+    char    qt_syms[SET_QT_SYMS_MAX + 1]; /* Quotes: symbols picked for the watchlist, comma separated */
 } app_settings_t;
 
 /* Initializes NVS and loads the settings. Call once, first thing in app_main. */
@@ -82,6 +86,9 @@ const char *settings_default_tr_url(void);
 
 /* The Voice AI server base URL from secrets.h (AI_CHAT_URL, or https://WS_HOST:WS_PORT/voice-ai-chat-api). */
 const char *settings_default_ai_url(void);
+
+/* The Quotes app's Stock API base URL from secrets.h (STOCK_API_URL, or https://WS_HOST:WS_PORT/stock2api). */
+const char *settings_default_qt_url(void);
 
 /* The WS_HOST from secrets.h (the host main/server_ca.pem was fetched from). */
 const char *settings_build_host(void);

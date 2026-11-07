@@ -36,6 +36,7 @@
 #include "net.h"
 #include "voice.h"
 #include "stocks.h"
+#include "quotes.h"
 #include "power.h"
 #include "translate_langs.h"
 #include "ui_theme.h"
@@ -178,6 +179,7 @@ enum {
     F_MCP_URL  = 1 << 6,  F_MCP_KEY = 1 << 7,  F_STK_AUTO = 1 << 8,
     F_DARK     = 1 << 9,  F_BRIGHT  = 1 << 10, F_VOLUME  = 1 << 11,
     F_AI_URL   = 1 << 12, F_AI_KEY  = 1 << 13,
+    F_QT_URL   = 1 << 14, F_QT_KEY  = 1 << 15,
 };
 
 typedef enum { ACT_NONE, ACT_NEW_CONV, ACT_NEW_AI_CONV, ACT_STOCKS_REFRESH } web_action_t;
@@ -228,12 +230,15 @@ static void apply_cb(void *arg)
     if (j->mask & F_VOLUME)   cfg->volume = j->v.volume;
     if (j->mask & F_AI_URL)   strlcpy(cfg->ai_url, j->v.ai_url, sizeof(cfg->ai_url));
     if (j->mask & F_AI_KEY)   strlcpy(cfg->ai_api_key, j->v.ai_api_key, sizeof(cfg->ai_api_key));
+    if (j->mask & F_QT_URL)   strlcpy(cfg->qt_url, j->v.qt_url, sizeof(cfg->qt_url));
+    if (j->mask & F_QT_KEY)   strlcpy(cfg->qt_api_key, j->v.qt_api_key, sizeof(cfg->qt_api_key));
 
     bool ws_changed   = strcmp(cfg->ws_url, old->ws_url) || strcmp(cfg->ws_api_key, old->ws_api_key);
     bool tr_changed   = strcmp(cfg->tr_url, old->tr_url) || strcmp(cfg->tr_api_key, old->tr_api_key);
     bool lang_changed = strcmp(cfg->tr_src, old->tr_src) || strcmp(cfg->tr_dst, old->tr_dst);
     bool ai_changed   = strcmp(cfg->ai_url, old->ai_url) || strcmp(cfg->ai_api_key, old->ai_api_key);
     bool mcp_changed  = strcmp(cfg->mcp_url, old->mcp_url) || strcmp(cfg->mcp_api_key, old->mcp_api_key);
+    bool qt_changed   = strcmp(cfg->qt_url, old->qt_url) || strcmp(cfg->qt_api_key, old->qt_api_key);
     bool changed = memcmp(cfg, old, sizeof(*cfg)) != 0;
 
     esp_err_t err = ESP_OK;
@@ -256,6 +261,7 @@ static void apply_cb(void *arg)
     if (cfg->volume != old->volume)           voice_set_volume(cfg->volume);
     if (cfg->brightness != old->brightness)   bsp_display_brightness_set(cfg->brightness);
     if (mcp_changed)                        stocks_config_changed();
+    if (qt_changed)                         quotes_config_changed();
     if (cfg->stocks_auto != old->stocks_auto) stocks_set_auto(cfg->stocks_auto);
 
     if (j->action == ACT_NEW_CONV)        voice_new_conversation();
@@ -331,6 +337,8 @@ static esp_err_t state_get(httpd_req_t *req)
     cJSON_AddStringToObject(s, "mcp_url", cfg.mcp_url);
     add_key_info(s, "mcp_key", cfg.mcp_api_key);
     cJSON_AddBoolToObject(s, "stocks_auto", cfg.stocks_auto);
+    cJSON_AddStringToObject(s, "qt_url", cfg.qt_url);
+    add_key_info(s, "qt_key", cfg.qt_api_key);
     cJSON_AddBoolToObject(s, "dark_mode", cfg.dark_mode);
     cJSON_AddNumberToObject(s, "brightness", cfg.brightness);
     cJSON_AddNumberToObject(s, "volume", cfg.volume);
@@ -341,6 +349,7 @@ static esp_err_t state_get(httpd_req_t *req)
     cJSON_AddStringToObject(d, "ai_url", settings_default_ai_url());
     cJSON_AddStringToObject(d, "tr_url", settings_default_tr_url());
     cJSON_AddStringToObject(d, "mcp_url", settings_default_mcp_url());
+    cJSON_AddStringToObject(d, "qt_url", settings_default_qt_url());
 
     /* status */
     cJSON *st = cJSON_AddObjectToObject(o, "status");
@@ -519,7 +528,7 @@ static esp_err_t settings_post(httpd_req_t *req)
     static const char *const http_schemes[] = { "https://", "http://", NULL };
     static const char *const known[] = {
         "ws_url", "ws_key", "wake_word", "ai_url", "ai_key", "tr_url", "tr_key", "tr_src", "tr_dst", "mcp_url", "mcp_key",
-        "stocks_auto", "dark_mode", "brightness", "volume", NULL,
+        "stocks_auto", "qt_url", "qt_key", "dark_mode", "brightness", "volume", NULL,
     };
 
     web_job_t *job = heap_caps_calloc(1, sizeof(*job), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -550,6 +559,8 @@ static esp_err_t settings_post(httpd_req_t *req)
     CHECK("mcp_url", take_str(j, "mcp_url", v->mcp_url, sizeof(v->mcp_url), http_schemes, F_MCP_URL, m, &err));
     CHECK("mcp_key", take_str(j, "mcp_key", v->mcp_api_key, sizeof(v->mcp_api_key), NULL, F_MCP_KEY, m, &err));
     CHECK("stocks_auto", take_bool(j, "stocks_auto", &v->stocks_auto, F_STK_AUTO, m, &err));
+    CHECK("qt_url",  take_str(j, "qt_url", v->qt_url, sizeof(v->qt_url), http_schemes, F_QT_URL, m, &err));
+    CHECK("qt_key",  take_str(j, "qt_key", v->qt_api_key, sizeof(v->qt_api_key), NULL, F_QT_KEY, m, &err));
     CHECK("dark_mode",   take_bool(j, "dark_mode", &v->dark_mode, F_DARK, m, &err));
     CHECK("brightness",  take_int(j, "brightness", 5, 100, &v->brightness, F_BRIGHT, m, &err));
     CHECK("volume",      take_int(j, "volume", 0, 100, &v->volume, F_VOLUME, m, &err));

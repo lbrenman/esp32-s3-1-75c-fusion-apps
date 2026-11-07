@@ -13,6 +13,7 @@
 #include "settings_store.h"
 #include "voice.h"
 #include "stocks.h"
+#include "quotes.h"
 #include "app_config.h"
 #include "text_ascii.h"
 #include "power.h"
@@ -435,6 +436,7 @@ static void do_reset(void *user)
     voice_reconnect();
     stocks_set_auto(cfg->stocks_auto);
     stocks_config_changed();
+    quotes_config_changed();
     ui_theme_set_dark(cfg->dark_mode);
     s_keep_scroll = -1;
     ui_nav_refresh();

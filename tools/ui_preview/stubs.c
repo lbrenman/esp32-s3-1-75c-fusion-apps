@@ -7,6 +7,7 @@
 #include "net.h"
 #include "voice.h"
 #include "stocks.h"
+#include "quotes.h"
 #include "power.h"
 #include "web_settings.h"
 #include "esp_timer.h"
@@ -23,7 +24,8 @@ static app_settings_t s = { "Home-WiFi", "example-password", "wss://voice.exampl
                             "https://fusion.example.com:4443/FusionStockWatchListMCP", "example-mcp-key-wxyz", 1, 1,
                             "wss://fusion.example.com:4443/translator", "example-tr-key-9f3e", "en", "es",
                             1, "482913", "https://fusion.example.com:4443/voice-ai-chat-api", "example-ai-key-71c2",
-                            "5b0c33e1-2f4a-4d8e-b1c9-60a7d2e4f8a1" };
+                            "5b0c33e1-2f4a-4d8e-b1c9-60a7d2e4f8a1",
+                            "https://fusion.example.com:4443/stock2api", "example-qt-key-5e8d", "AAPL,INTC,TXN" };
 void settings_init(void) {}
 void settings_get(app_settings_t *o) { *o = s; }
 app_settings_t *settings_copy_new(void) { app_settings_t *p = malloc(sizeof(*p)); *p = s; return p; }
@@ -47,6 +49,7 @@ const char *settings_build_host(void) { return "example"; }
 const char *settings_default_mcp_url(void) { return "https://example:4443/FusionStockWatchListMCP"; }
 const char *settings_default_tr_url(void) { return "wss://example:4443/translator"; }
 const char *settings_default_ai_url(void) { return "https://example:4443/voice-ai-chat-api"; }
+const char *settings_default_qt_url(void) { return "https://example:4443/stock2api"; }
 
 net_state_t g_net = NET_UP;
 void net_start(void) {}
@@ -218,6 +221,76 @@ void stocks_fake_detail(bool ok)
 }
 uint32_t stocks_version(void) { return g_ss_ver; }
 void stocks_get(stocks_snapshot_t *o) { *o = g_ss; }
+
+/* ---- Quotes engine: answers only when sim.c says so (quotes_fake_*). */
+qt_snapshot_t g_qs;
+static uint32_t g_qs_ver = 1;
+void quotes_init(void) {}
+void quotes_set_active(bool a) { printf("quotes active %d\n", a); g_qs.link = a ? QT_LINK_READY : QT_LINK_OFF; g_qs_ver++; }
+void quotes_config_changed(void) { printf("quotes config changed\n"); }
+void quotes_request_quote(const char *sym)
+{
+    printf("quotes GET /quote?symbol=%s\n", sym);
+    if (strcmp(g_qs.q_sym, sym)) { memset(&g_qs.q, 0, sizeof(g_qs.q)); strcpy(g_qs.q_sym, sym); g_qs.q_us = 0; }
+    g_qs.q_state = QT_LOADING;
+    g_qs_ver++;
+}
+void quotes_request_watchlist(const stocks_sym_t *syms, int n)
+{
+    printf("quotes GET /watchlist?symbols=");
+    for (int i = 0; i < n; i++) printf("%s%s", i ? "," : "", syms[i]);
+    printf("\n");
+    if (n != g_qs.wl_n || memcmp(syms, g_qs.wl_syms, n * sizeof(stocks_sym_t))) {
+        g_qs.wl_n = n;
+        memcpy(g_qs.wl_syms, syms, n * sizeof(stocks_sym_t));
+        memset(g_qs.wl_rows, 0, sizeof(g_qs.wl_rows));
+        for (int i = 0; i < n; i++) strcpy(g_qs.wl_rows[i].sym, syms[i]);
+        g_qs.wl_loaded = false;
+        g_qs.wl_us = 0;
+    }
+    g_qs.wl_state = n ? QT_LOADING : QT_IDLE;
+    g_qs_ver++;
+}
+/* answer the pending watchlist: symbols in fake_quotes get a quote, the rest "no quote" */
+void quotes_fake_watchlist(void)
+{
+    for (int i = 0; i < g_qs.wl_n; i++) {
+        stocks_quote_t r = { 0 };
+        strcpy(r.sym, g_qs.wl_syms[i]);
+        for (size_t k = 0; k < sizeof(fake_quotes) / sizeof(fake_quotes[0]); k++)
+            if (!strcmp(fake_quotes[k].sym, r.sym) && fake_quotes[k].has_price) r = fake_quotes[k];
+        g_qs.wl_rows[i] = r;
+    }
+    g_qs.wl_loaded = true;
+    g_qs.wl_state = QT_OK;
+    g_qs.wl_us = g_sim_us;
+    g_qs.wl_at = 1792600860;
+    g_qs.last_ok = true; g_qs.last_http = 200; g_qs.last_us = g_sim_us;
+    g_qs_ver++;
+}
+/* answer the pending quote (ok = false: the server's 204, "No quote for X") */
+void quotes_fake_quote(bool ok)
+{
+    g_qs.last_us = g_sim_us; g_qs.last_ok = true; g_qs.last_http = ok ? 200 : 204;
+    if (!ok) { g_qs.q_state = QT_ERROR; snprintf(g_qs.q_note, sizeof(g_qs.q_note), "No quote for %s", g_qs.q_sym); g_qs_ver++; return; }
+    stocks_detail_t d = { 0 };
+    for (size_t k = 0; k < sizeof(fake_quotes) / sizeof(fake_quotes[0]); k++)
+        if (!strcmp(fake_quotes[k].sym, g_qs.q_sym)) d.q = fake_quotes[k];
+    strcpy(d.q.sym, g_qs.q_sym);
+    if (!d.q.has_price) { strcpy(d.q.name, "Example Corp"); d.q.price = 42.17; d.q.change = 0.38; d.q.pct = 0.9093; }
+    d.q.has_price = d.q.has_change = d.q.has_pct = true;
+    d.open = d.q.price - d.q.change * 0.6; d.prev_close = d.q.price - d.q.change;
+    d.high = d.q.price * 1.012; d.low = d.q.price * 0.981;
+    d.has_open = d.has_prev_close = d.has_high = d.has_low = true;
+    g_qs.q = d;
+    g_qs.q_state = QT_OK;
+    g_qs.q_us = g_sim_us;
+    g_qs.q_at = 1792600920;
+    g_qs_ver++;
+}
+void quotes_bump(void) { g_qs_ver++; }
+uint32_t quotes_version(void) { return g_qs_ver; }
+void quotes_get(qt_snapshot_t *o) { *o = g_qs; }
 
 /* ---- battery (sim.c changes g_power to preview other states) */
 power_info_t g_power = { true, true, 87, 4012, false, false, false };

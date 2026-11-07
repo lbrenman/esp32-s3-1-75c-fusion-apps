@@ -9,7 +9,8 @@ the recording uploaded as `multipart/form-data`),
 a **Translator** app (push-to-talk voice translator for the [Amplify Fusion translator server](https://github.com/lbrenman/GitHubAmplify-Fusion-Voice-Translation-and-Transcription-Demo-Using-Mistral-and-AWS-Translate): speak
 English, hear Spanish; also shows Hindi, Arabic and Russian text),
 a **Stocks** app (watchlist client for the [FusionStockWatchListMCP server](https://github.com/lbrenman/Amplify-Fusion-Stock-Watch-List-MCP), an Amplify Fusion MCP
-server) and a **Settings** app. Day and night themes, Font Awesome icons, slide transitions.
+server), a **Quotes** app (a second stocks app for the plain REST Stock API: tap a symbol for
+its quote, or pick several and show them as a watchlist) and a **Settings** app. Day and night themes, Font Awesome icons, slide transitions.
 A **phone settings page** (`http://fusion-apps.local`, PIN-protected) changes the same settings from
 a phone or computer on your Wi-Fi.
 
@@ -19,6 +20,8 @@ a phone or computer on your Wi-Fi.
 the device.*
 
 ![Stocks](docs/screenshots/stocks.png)
+
+![Quotes](docs/screenshots/quotes.png)
 
 ![Translator](docs/screenshots/translator.png)
 
@@ -45,6 +48,13 @@ the device.*
 > Devanagari fonts, Replay) pass host tests and are syntax-checked against the ESP-IDF 5.5.2 headers, and the screens are
 > checked in `tools/ui_preview`, but it hasn't been built with `idf.py` or talked to the real
 > translator server yet.
+
+> **Quotes is new and untested on the board.** Its screens are compiled and clicked through on a
+> PC against LVGL 9.5 on both boards (`tools/ui_preview`), its URL building and the Stock API's
+> example replies pass host tests (`tools/stocks_test`), and `quotes_core.c` is syntax-checked
+> against the ESP-IDF 5.5.2 `esp_http_client`, `esp_crt_bundle`, `esp_timer` and heap headers, but
+> it hasn't been built with `idf.py` or talked to the real Stock API yet. Watch the `quotes` lines in
+> the log on the first run.
 
 > **Stocks is new and untested on the board.** Its screens are compiled and clicked through on a
 > PC against LVGL 9.5 (`tools/ui_preview`), its reply parsing and MCP message handling pass host
@@ -80,8 +90,14 @@ the device.*
 | **Quote** (tap a row in Stocks) | A detailed quote from `GetStockQuote`: price, change, open, previous close and the day's range (low–high with today's price marked). Refresh and remove buttons |
 | **Pick symbols** (+ or swipe left in Stocks) | Tabs of preset symbols (**QQQ 1**, **QQQ 2**, **Blue Chip**) and **Other** (watchlist symbols not on a tab, e.g. added from Claude). Tap to add (green) or remove (gray) |
 | **Stock server** (gear in Stocks) | See and change the MCP server URL and API key, connection status, refresh now, reset URL to `secrets.h` |
+| **Quotes** | The REST stocks app. A menu: **Get a quote**, **Watchlist** (shows what you picked) and **Stock API** (with its status) |
+| **Get a quote** (Quotes) | Tabs of symbols (**QQQ 1**, **QQQ 2**, **Blue Chip**), 16 big buttons each (4 x 4), and a big back button. Tap one for its Quote screen; the one you looked at last has a ring |
+| **Quote** (Quotes) | A detailed quote from `GET /quote`: price, change, open, previous close and the day's range. Refresh button; refreshes every minute while open |
+| **Pick symbols** (Quotes > Watchlist) | The same tabs plus **Picked**. Tap to select (green) or deselect, up to 16. The trash button clears the list. **Watchlist (N)** shows them |
+| **Watchlist** (Quotes) | Quotes for the picked symbols from one `GET /watchlist`, in the order you picked them. Tap a row for its Quote screen. Refresh button; refreshes every minute while open |
+| **Stock API** (Quotes) | See and change the base URL and API key, status of the last request, the two endpoints, **Test** (asks for one quote), reset URL to `secrets.h` |
 | **Settings** | Wi-Fi network (scan list or typed name) and password, dark mode, brightness, volume, voice-chat conversation (show / start new) and wake word on/off, Voice AI conversation (show / start new), phone settings page (on/off, address, PIN), battery (%, state, voltage), version and free memory, restart, reset |
-| **Phone settings page** (in a browser) | `http://fusion-apps.local` on the same Wi-Fi, after the PIN from Settings > Phone: server URLs and API keys for Voice chat, Voice AI, Translator and Stocks, Translator languages, wake word, new conversation (both voice apps), Stocks auto refresh, dark mode, brightness, volume, battery and memory, restart. Everything except Wi-Fi |
+| **Phone settings page** (in a browser) | `http://fusion-apps.local` on the same Wi-Fi, after the PIN from Settings > Phone: server URLs and API keys for Voice chat, Voice AI, Translator, Stocks and Quotes, Translator languages, wake word, new conversation (both voice apps), Stocks auto refresh, dark mode, brightness, volume, battery and memory, restart. Everything except Wi-Fi |
 
 ### Gestures
 
@@ -111,6 +127,11 @@ the device.*
 | Quote | Swipe right, or the ‹ button | Back to Stocks |
 | Pick symbols | Tap a symbol | Add or remove it (orange while it's being saved) |
 | Pick symbols, Stock server | Swipe right, or the ‹ button | Back to Stocks |
+| Quotes and its screens | Swipe right, or the ‹ button | Back (from the Quotes menu: Home) |
+| Get a quote | Tap a symbol | Quote screen for that symbol |
+| Pick symbols (Quotes) | Tap a symbol | Select or deselect it for the watchlist |
+| Pick symbols (Quotes) | **Watchlist (N)** | Watchlist screen for the picked symbols |
+| Watchlist (Quotes) | Tap a row | Quote screen for that symbol |
 | Settings and its screens | Swipe right, or the ‹ button | Back |
 
 Recording starts the moment your finger lands, so your first word isn't cut off. If the finger
@@ -164,12 +185,18 @@ as before on the watch; the page is a second way to change the same settings.
 2. On the phone, on the same Wi-Fi: open `http://fusion-apps.local` (or `http://<IP address>`).
 3. Enter the PIN. The browser stays signed in until the watch restarts or you make a new PIN.
 
+Each section (Voice chat, Voice AI, Translator, Stocks, Quotes, Display and sound, Watch) opens and
+closes when you tap its title; **Expand all** / **Collapse all** sits under the status line. The
+first time, only Watch is open; after that the page remembers which sections you left open (in that
+browser's local storage, so each phone keeps its own).
+
 | On the page | What it changes |
 | --- | --- |
 | Voice chat | Server URL, API key, wake word on/off, **New conversation** |
 | Voice AI | Server base URL, API key, **New conversation** |
 | Translator | From / Into languages (with Swap), server base URL, API key |
 | Stocks | Auto refresh, **Refresh now**, MCP server URL, API key |
+| Quotes | Stock API base URL, API key |
 | Display and sound | Dark mode, brightness, volume |
 | Watch | Wi-Fi name and signal, battery, free memory, version, **Restart watch**, **Sign out** |
 
@@ -338,6 +365,34 @@ both plain-JSON and SSE (`data: {...}`) replies. A network error, a 5xx, or an e
 is retried once with a new connection and, if needed, a new session; a reply from the server (an
 RPC error or a tool error) is not retried.
 
+### The Quotes app
+
+Quotes is the REST version of Stocks: it talks to a plain HTTPS **Stock API** (two `GET`
+endpoints, `x-api-key` header) instead of the MCP server. Both apps are on Home and don't share
+anything but the reply parsers. Quotes' watchlist is just the symbols you picked on the watch
+(saved on the device, first boot `AAPL,INTC,TXN`); the server keeps no list.
+
+| When | What happens |
+| --- | --- |
+| Quotes opens | Nothing is fetched yet; the Stock API row shows "Ready" (or what's missing) |
+| Tap a symbol on **Get a quote** | `GET <base>/quote?symbol=NVDA`. The Quote screen shows it, then refreshes it every 60 s (`QT_REFRESH_MS`) while it's open |
+| **Watchlist (N)** on Pick symbols | Saves the picked symbols, then `GET <base>/watchlist?symbols=AAPL,TXN,NVDA`. Refreshes every 60 s while open; after a failure, a retry every 15 s (`QT_RETRY_MS`) |
+| Tap a row on the Watchlist | The row's numbers at once, then `GET /quote` fills in open, previous close and the day's range |
+| Back to Home | Closes the connection |
+
+All requests run in the Quotes engine's own task (`quotes_core.c`), so the screen never freezes.
+Requests close together share one TLS connection; after 30 s idle it's closed. A request that fails
+on the network is retried once on a new connection.
+
+| Reply | Shown as |
+| --- | --- |
+| 200 `{"Quote":{...}}` / `{"Watchlist":[...]}` | The quote / the rows. A picked symbol missing from the reply, or quoted as all zeros, shows "no quote" / "Not found" |
+| 204 (Symbol(s) not found) | Quote: "No quote for XYZ". Watchlist: every row "no quote" |
+| 400 / 500 `{"message":"..."}` | The message and the status, e.g. "Missing symbol (HTTP 400)" |
+| 401 / 403 | "HTTP 401 - check the API key" |
+| 404 | "HTTP 404 - check the API URL" |
+| No answer | "Can't reach the server" (`quotes:` log lines show the host and which certificate) |
+
 ### Voice chat ring colors
 
 | Ring | Status | Meaning |
@@ -493,6 +548,18 @@ The Stocks server comes from two lines you add to `main/secrets.h` (see `main/se
 An older `secrets.h` without them still builds; Stocks then asks you to set the URL with the gear
 button.
 
+The Quotes app's Stock API is optional in `secrets.h`:
+
+```c
+#define STOCK_API_URL       "https://your-fusion-host:4443/stock2api"   // base URL; the app adds /quote, /watchlist
+#define STOCK_API_KEY       "your-stock-api-key"
+// #define STOCK_API_SYMBOLS "AAPL,INTC,TXN"                            // first-boot watchlist
+```
+
+Without them Quotes uses `https://WS_HOST:WS_PORT/stock2api` and the voice server's API key. A base
+URL pasted with `/quote` or `/watchlist` (or a `?query`) on the end is trimmed. As with Stocks, a host
+other than `WS_HOST` is checked against the built-in CA bundle.
+
 The Translator's server is optional in `secrets.h` too:
 
 ```c
@@ -573,19 +640,21 @@ esp32-s3-1-75c-fusion-apps/
 │       ├── translate_langs.c/.h   the language lists and pair rules (pure C)
 │       ├── app_stocks.c           Stocks: Watchlist, Quote, Pick symbols and Stock server screens
 │       ├── stocks_core.c, stocks.h   the Stocks engine task: tool calls, queue, refresh timer (no LVGL)
-│       └── stocks_parse.c/.h      parses the watchlist server's replies (pure C, host-tested)
+│       ├── stocks_parse.c/.h      parses the watchlist server's replies (pure C, host-tested; Quotes uses it too)
+│       ├── app_quotes.c           Quotes: menu, Get a quote / Pick symbols, Watchlist, Quote, Stock API screens
+│       └── quotes_core.c, quotes.h   the Quotes engine task: GET /quote and /watchlist over HTTPS (no LVGL)
 ├── tools/
 │   ├── make_icon_font.py          regenerates main/ui/ui_icons*.c
 │   ├── make_text_font.py          regenerates main/ui/ui_font_latin_*.c
 │   ├── make_script_fonts.py       regenerates main/ui/ui_font_arabic_*.c, ui_font_deva_*.c, main/text_deva_map.h
 │   ├── ui_preview/                runs the UI on your Mac and saves screenshots
-│   └── stocks_test/               host tests for the Stocks reply parsing and MCP reply handling
+│   └── stocks_test/               host tests for the Stocks reply parsing, MCP reply handling and the Quotes helpers
 ├── assets/                        Font Awesome Free, Montserrat Medium, Noto Sans Arabic / Devanagari
 │                                  Medium TTFs + licenses (font inputs)
 └── docs/screenshots/
 ```
 
-All LVGL work happens in the LVGL task. The voice and stocks engines, Wi-Fi and settings never touch LVGL
+All LVGL work happens in the LVGL task. The voice, stocks and quotes engines, Wi-Fi and settings never touch LVGL
 objects; the screens read their state from LVGL timers. That keeps tasks from drawing on screens
 that have already been closed.
 
@@ -648,7 +717,7 @@ rm main/server_ca.pem && idf.py reconfigure && idf.py build flash
 Stocks follows the same rule: if the host in its server URL is `WS_HOST` (your Fusion sandbox
 usually serves both on port 4443), it uses `server_ca.pem`; any other host is checked against the
 built-in CA bundle (the `mcp` log line says which). Unlike the StackChan version, the certificate
-is always verified.
+is always verified. Quotes does the same (the `quotes: connecting to ...` line says which).
 
 ## Adding an app
 
@@ -753,13 +822,16 @@ The click-through script places taps and swipes from the screen's center and edg
 Change the fake values in `stubs.c` or the click-through script in `sim.c` to preview other states.
 The Stocks screens use a fake watchlist (`stocks_fake_load()` in `stubs.c`); shots `40_` to `59_`.
 The Translator screens are shots `70_` to `92_` (fake translations set in `sim.c`).
+The Quotes screens are shots `a0_` to `c0_` (fake replies from `quotes_fake_quote()` and
+`quotes_fake_watchlist()` in `stubs.c`).
 Voice AI is shots `93_` to `99b_` (its screens, its server screen, an error, Settings > Voice AI).
 Settings > Phone (the phone settings page's switch, address and PIN) is shots `15e_` to `15i_`.
 
 ## Test the Stocks parsing on your Mac
 
 `tools/stocks_test` runs the Stocks reply parsers and the MCP client's reply handling (SSE and
-plain JSON, request ids, text content) against the server's real replies and other shapes:
+plain JSON, request ids, text content) against the server's real replies and other shapes, and the
+Quotes app's URL and symbol helpers against the Stock API's example replies (from its OpenAPI spec):
 
 ```bash
 cd tools/stocks_test
@@ -794,6 +866,12 @@ make                      # first run clones cJSON; prints "N checks, 0 failed"
 | `app_config.h` | `DEFAULT_STOCKS_AUTO` | 1 (auto refresh on, first boot) |
 | `app_config.h` | `MCP_DEBUG` | 0; 1 logs the first 300 bytes of each MCP reply |
 | `apps/app_stocks.c` | `GROUPS` (Pick tabs, up to 25 symbols each) | QQQ 1, QQQ 2, Blue Chip |
+| `app_config.h` | `QT_PATH_QUOTE`, `QT_PATH_WATCHLIST`, `QT_KEY_HEADER`, `QT_TIMEOUT_MS` | `/quote`, `/watchlist`, `x-api-key`, 15 s |
+| `app_config.h` | `QT_REFRESH_MS`, `QT_RETRY_MS`, `QT_SEL_MAX` | 60 s, 15 s, 16 symbols |
+| `app_config.h` | `DEFAULT_QT_SYMBOLS` | `AAPL,INTC,TXN` (first boot; `STOCK_API_SYMBOLS` in `secrets.h` wins) |
+| `app_config.h` | `QT_DEBUG` | 0; 1 logs the first 300 bytes of each Stock API reply |
+| `apps/app_quotes.c` | `GROUPS` (tabs, up to 16 symbols each) | QQQ 1, QQQ 2, Blue Chip |
+| `apps/app_quotes.c` | `SYM_W`, `SYM_H`, `HDR_BTN` (symbol and back button sizes, 1.75C / 2.06) | 72 x 50 / 86 x 58 px, 52 / 56 px |
 | `app_config.h` | `DEFAULT_WEB_SETTINGS`, `WEB_HOSTNAME` | on (first boot), `fusion-apps` (-> `fusion-apps.local`) |
 | `app_config.h` | `WEB_PIN_MAX_TRIES`, `WEB_PIN_LOCK_S`, `WEB_MAX_SESSIONS` | 5, 60 s, 4 |
 | `ui/ui_theme.c` | palette colors | |
@@ -834,6 +912,26 @@ RIFF....WAVE....   (16 kHz mono 16-bit)
 - **Errors**: `{"error":{"code":"no_speech","message":"...","stage":"transcribe"}}` with a 4xx/5xx
   status. `code` and `stage` go to the log; the screen shows a short note (see "Voice AI").
 - Chunked replies and replies with `Content-Length` both work. No redirects are followed.
+
+### Stock API protocol (Quotes)
+
+Two `GET`s with the API key in a header (the Stock API's OpenAPI 3.0 spec):
+
+```
+GET <base>/quote?symbol=AAPL
+GET <base>/watchlist?symbols=INTC,TXN,AAPL
+x-api-key: <key>
+Accept: application/json
+```
+
+```json
+{"Quote":{"Symbol":"AAPL","Name":"Apple Inc","Price":210.62,"Change":-3.48,"ChangePercent":-1.6254,
+ "DayHigh":216.07,"DayLow":210.3,"OpenPrice":215.805,"PreviousClose":214.1}}
+{"Watchlist":[{"Symbol":"TXN","Name":"Texas Instruments Inc","Price":198.47,"Change":0.17,"ChangePercent":0.0857}]}
+```
+
+`204` means "Symbol(s) not found"; `400` and `500` carry `{"message":"..."}`; `401` / `403` are a
+missing or wrong key. `Volume` in watchlist items is accepted and not shown.
 
 ### Translator protocol
 
@@ -909,7 +1007,7 @@ rm sdkconfig && idf.py -p /dev/cu.usbmodem1101 build flash monitor
 ## Troubleshooting
 
 Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app`, `settings`,
-`net`, `voice`, `stocks`, `mcp`, `power`, `web` (ESP-SR's own lines: `AFE`, `MODEL_LOADER`).
+`net`, `voice`, `stocks`, `mcp`, `quotes`, `power`, `web` (ESP-SR's own lines: `AFE`, `MODEL_LOADER`).
 
 | Symptom / log | Likely cause | Fix |
 | --- | --- | --- |
@@ -957,6 +1055,12 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app
 | Stocks: "Tool operation not found for tool: ..." | A tool name in `app_config.h` doesn't exist on the server | Compare `STOCKS_TOOL_*` with the server's tools |
 | Stocks: "Bad reply from the server" or "Unrecognized quotes reply" | The reply format changed | Set `MCP_DEBUG 1`, rebuild, and look at the `mcp: reply:` line |
 | Stocks: a row says "no quote" | The server accepted a ticker its quote service doesn't know | Long-press the row, or remove it on the Other tab |
+| Quotes: "Set the API URL (Stock API screen)" | No usable base URL (empty, or the `secrets.h.example` placeholder) | Quotes > Stock API > Base URL, or set `STOCK_API_URL` and Reset settings |
+| Quotes: "HTTP 401 - check the API key" (or 403) | API key | Quotes > Stock API > API key |
+| Quotes: "HTTP 404 - check the API URL" | Wrong base URL: the app adds `/quote` and `/watchlist` to it | Compare with the Endpoints row on the Stock API screen |
+| Quotes: "Missing symbol (HTTP 400)" | The request reached the API without its query (a proxy dropped it?) | Set `QT_DEBUG 1` and check the `quotes:` lines |
+| Quotes: every watchlist row says "no quote" | The API answered 204 (none of the symbols found) | Try **Test** on the Stock API screen with a known symbol |
+| Quotes: "Unrecognized quote reply" | The reply format changed | Set `QT_DEBUG 1`, rebuild, and look at the `quotes: reply:` line |
 | Pick: a button stays green after a remove | The server had the symbol twice and removed one copy | Tap it again |
 | Pick: "Still loading the watchlist..." | Taps wait until the symbol list has loaded once | Wait for the status line to show the count |
 | A name shows ' where the real one has ’ (e.g. an iPhone hotspot "Leor's iPhone") | The built-in fonts are ASCII-only, so Wi-Fi names, stock names and voice replies are shown with ASCII look-alikes (the Translator has its own accented fonts) | Nothing to fix: the real name is what's saved and joined |
@@ -973,4 +1077,5 @@ Read the serial log first (`idf.py -p /dev/cu.usbmodem1101 monitor`). Tags: `app
 | Opening Settings restarts the board (`Stack canary watchpoint triggered (LVGL)` or `stack overflow in task LVGL`) | The LVGL task's 8 KB stack (2.06) ran out while building the screen | Fixed: the screens take their settings copy from PSRAM with `SETTINGS_COPY(cfg)` (`settings_store.h`), freed when the function returns. Don't use `static app_settings_t` for this: statics live in internal RAM, and 22 of them (33 KB) starved the display |
 | Screen freezes, then `task_wdt: ... CPU 0: taskLVGL` with `wait_for_flushing` in the backtrace, after `spi transmit (queue) color failed` (2.06) | A band couldn't get its internal DMA buffer and esp_lvgl_port never reported it done, so LVGL waited forever | Fixed with a flush guard in `main/display_start.c`: after 250 ms it logs `A display transfer never finished ... skipped it`, and repaints once a second passes with no more losses. If that line shows up often, internal RAM is short: the numbers it logs should show a DMA block bigger than one band (about 10 KB) |
 | "Wake word off: low memory" as soon as Voice chat or Voice AI opens; log `not enough internal RAM to start it (NN KB free, largest DMA block NN KB ...)` | The wake word engine needs about 15 KB of internal RAM and would leave too little for the display's DMA buffers (common on the 2.06) | Hold to talk and tap still work. The engine is no longer started when it can't fit (`WAKE_START_COST_KB`, `WAKE_START_DMA_MARGIN_KB`) |
+| 1.75C: after flashing, the screen stays half drawn (two flat colors) and the log stops after `power: battery ...`; earlier, `Cannot acquire bus when a polling transaction is in progress` and `Draw bitmap failed` | At boot, the brightness command and LVGL's first frame used the display's SPI bus at the same time, and the frame that failed could leave the LVGL task stuck | Fixed: `app_main` sets the brightness while holding the display lock, and logs `Building the UI ...` / `UI built` (or `Still waiting for the display lock after N s` every 3 s instead of hanging silently) |
 | No battery level on Home | The AXP2101 didn't answer on I2C (`power:` lines in the log) | Check the log line; the rest of the app works without it |

@@ -175,6 +175,15 @@ static bool get_once(const char *what)
     esp_err_t err = esp_http_client_perform(h->http);
     int ms = (int)((esp_timer_get_time() - t0) / 1000);
     if (err != ESP_OK) {
+        /* esp_http_client turns a 401 without a WWW-Authenticate header (API gateways send none)
+         * into ESP_ERR_NOT_SUPPORTED. The server did answer: report the status, don't retry. */
+        int st = esp_http_client_get_status_code(h->http);
+        if (err == ESP_ERR_NOT_SUPPORTED && st >= 400) {
+            h->status = st;
+            ESP_LOGW(TAG, "%s -> HTTP %d in %d ms (API key rejected?)", what, st, ms);
+            http_close();                      /* the body wasn't read: don't reuse the connection */
+            return true;
+        }
         ESP_LOGW(TAG, "%s: request to %s failed after %d ms: %s", what, h->host, ms, esp_err_to_name(err));
         http_close();
         return false;
